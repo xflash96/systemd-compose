@@ -120,7 +120,8 @@ syntax) may use compose's interpolation: `$VAR`, `${VAR}`, `${VAR:-default}`,
 systemd 248) are left for the manager to expand, so `environment:
 {SOCK: "%t/app.sock"}` works on any machine; `%%` is a literal percent. Anything else
 after a `%` is refused at load, since systemd would drop the whole line with
-only a log message. `working_dir`, `env_file` and `build` take no `%`: the
+only a log message. In yaml a value that starts with `%` must be quoted:
+`command: "%h/bin/tool --flag"`, not `command: %h/bin/tool --flag`. `working_dir`, `env_file` and `build` take no `%`: the
 tool reads those paths itself.
 
 | key | renders to |
@@ -173,11 +174,12 @@ not; `up --no-recreate` restarts none, and a changed one stays `changed (not
 applied)` for the next `up`. Neither touches an `on_change: start-only`
 service: `up` never restarts one.
 
-`down` is `disable --now` on every unit plus `reset-failed`, and it retires
-what an older version of the yaml registered from this directory, active or
-not (no `--force`: `down` is the verb that stops things), so nothing of the
-project stays registered. The current units' rendered files stay, as
-compose keeps the compose file; a retired orphan's file goes.
+`down` unregisters every unit (one `disable`, then a `stop` of what was
+running, then `reset-failed`), and it retires what an older version of the
+yaml registered from this directory, active or not (no `--force`: `down` is
+the verb that stops things), so nothing of the project stays registered. The
+current units' rendered files stay, as compose keeps the compose file; a
+retired orphan's file goes.
 
 ## Overrides outside the yaml
 

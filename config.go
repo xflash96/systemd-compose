@@ -86,7 +86,7 @@ func (w Words) Empty() bool { return w.Line == "" && len(w.List) == 0 }
 
 // program is the first word, the one that names what runs.
 func (w Words) program() string {
-	if w.List != nil {
+	if len(w.List) > 0 {
 		return w.List[0]
 	}
 	first, _, _ := firstWord(w.Line)
@@ -181,7 +181,6 @@ func FindConfig(dir string) string {
 var (
 	reProjectName = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 	reServiceName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-	reEnvKey      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	reMemory      = regexp.MustCompile(`^[0-9]+[KMGT]?$`)
 	reBadName     = regexp.MustCompile(`[^A-Za-z0-9_]+`)
 	reDirective   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
@@ -243,7 +242,11 @@ func applyProfiles(p *Project, flags []string, dotenv map[string]string) error {
 				names = append(names, k)
 			}
 			sort.Strings(names)
-			return fmt.Errorf("profile %q (from %s) is no service's; profiles in this file: %s", n, p.ProfilesFrom, strings.Join(names, ", "))
+			where := "this file declares no profiles"
+			if len(names) > 0 {
+				where = "profiles in this file: " + strings.Join(names, ", ")
+			}
+			return fmt.Errorf("profile %q (from %s) is no service's; %s", n, p.ProfilesFrom, where)
 		}
 	}
 	for _, s := range p.EnabledServices() {
@@ -319,7 +322,7 @@ func nameOverride(flag string, dotenv map[string]string) (name, from string) {
 func parse(data []byte, abs string, override, from string, vars map[string]string) (*Project, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, err
+		return nil, quoteHint(err, data)
 	}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
 		return nil, fmt.Errorf("empty file")
@@ -404,6 +407,24 @@ func parse(data []byte, abs string, override, from string, vars map[string]strin
 		return nil, err
 	}
 	return p, nil
+}
+
+// quoteHint explains yaml's "cannot start any token" when the line holds a
+// value that starts with %: yaml reserves % at the start of a plain value,
+// and a specifier-led path is the likeliest way to write one.
+func quoteHint(err error, data []byte) error {
+	var line int
+	if _, scanErr := fmt.Sscanf(err.Error(), "yaml: line %d:", &line); scanErr != nil || !strings.Contains(err.Error(), "cannot start any token") {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	if line < 1 || line > len(lines) {
+		return err
+	}
+	if l := lines[line-1]; strings.Contains(l, ": %") || strings.Contains(l, "- %") {
+		return fmt.Errorf("%v (a value that starts with %% must be quoted in yaml: \"%%h/...\")", err)
+	}
+	return err
 }
 
 // projectName is the one rule for a project name, wherever it comes from.
@@ -794,7 +815,7 @@ func firstWord(cmd string) (word string, quoted bool, err error) {
 func parseEnvironment(n *yaml.Node, ctx string) ([]KV, error) {
 	var out []KV
 	add := func(k, v string, line int) error {
-		if !reEnvKey.MatchString(k) {
+		if !isVarName(k) { // the same rule interpolation uses for ${KEY}
 			return fmt.Errorf("line %d: %s: environment: %q is not a valid variable name", line, ctx, k)
 		}
 		if strings.ContainsAny(v, "\n\r") {

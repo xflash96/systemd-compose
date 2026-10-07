@@ -30,32 +30,26 @@ func TestInterpolate(t *testing.T) {
 		"${B:-}":                   "",
 		"price: $$5 for ${A}pples": "price: $5 for apples",
 		"${PORT}${PORT}":           "80808080",
-		"$A_B and ${A}_B":          "", // $A_B is the variable A_B
 		"${B:-$$literal}":          "$literal",
 		"${B:-${A:+set}}":          "set",
 	}
 	for in, want := range good {
 		got, err := interpolate(in, vars)
-		if in == "$A_B and ${A}_B" {
-			if err == nil || !strings.Contains(err.Error(), "A_B is not set") {
-				t.Errorf("%q: want A_B unset, got %q %v", in, got, err)
-			}
-			continue
-		}
 		if err != nil || got != want {
 			t.Errorf("interpolate(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
 	bad := map[string]string{
-		"$B":             "B is not set",
-		"${B}":           "B is not set",
-		"${EMPTY:?gone}": "EMPTY: gone",
-		"${B?no ${A}}":   "B: no a",
-		"${A":            "unclosed",
-		"$1":             "write $$",
-		"cost $ 5":       "write $$",
-		"${}":            "no variable name",
-		"${A/x/y}":       "unknown form",
+		"$B":              "B is not set",
+		"$A_B and ${A}_B": "A_B is not set", // $A_B is the variable A_B, not $A + "_B"
+		"${B}":            "B is not set",
+		"${EMPTY:?gone}":  "EMPTY: gone",
+		"${B?no ${A}}":    "B: no a",
+		"${A":             "unclosed",
+		"$1":              "write $$",
+		"cost $ 5":        "write $$",
+		"${}":             "no variable name",
+		"${A/x/y}":        "unknown form",
 	}
 	for in, want := range bad {
 		if _, err := interpolate(in, vars); err == nil || !strings.Contains(err.Error(), want) {
@@ -84,6 +78,26 @@ EMPTY=
 			t.Errorf("%s = %q, want %q", k, v[k], w)
 		}
 	}
+	os.WriteFile(p, []byte("A=\"x\" # note\nB='y' # note\n"), 0o644)
+	if v, err := readDotenv(p); err != nil || v["A"] != "x" || v["B"] != "y" {
+		t.Errorf("a comment after a quoted value must not leave the quotes in it: %q %v", v, err)
+	}
+	os.WriteFile(p, []byte(`A="say \"hi\"" # note`+"\n"), 0o644)
+	if v, err := readDotenv(p); err != nil || v["A"] != `say "hi"` {
+		t.Errorf("an escaped quote is not the closing one: %q %v", v, err)
+	}
+	os.WriteFile(p, []byte("A=\"x\" junk\n"), 0o644)
+	if _, err := readDotenv(p); err == nil || !strings.Contains(err.Error(), "after the closing") {
+		t.Errorf("junk after the closing quote: %v", err)
+	}
+	os.WriteFile(p, []byte("A=\"x\nB=1\n"), 0o644)
+	if _, err := readDotenv(p); err == nil || !strings.Contains(err.Error(), ":1: unclosed") {
+		t.Errorf("unclosed quote: %v", err)
+	}
+	os.WriteFile(p, []byte("CERT=\"-----BEGIN-----\nabc\n-----END-----\" # pem\nNEXT='a\nb'\nAFTER=$NEXT\n"), 0o644)
+	if v, err := readDotenv(p); err != nil || v["CERT"] != "-----BEGIN-----\nabc\n-----END-----" || v["NEXT"] != "a\nb" || v["AFTER"] != "a\nb" {
+		t.Errorf("multi-line quoted values: %q %v", v, err)
+	}
 	if v, err := readDotenv(filepath.Join(t.TempDir(), "none")); err != nil || len(v) != 0 {
 		t.Errorf("missing .env: %v %v", v, err)
 	}
@@ -97,6 +111,7 @@ EMPTY=
 // a plain scalar retyped, a literal $ written $$ in ExecStart.
 func TestInterpolationInYaml(t *testing.T) {
 	t.Setenv(ProjectNameVar, "")
+	t.Setenv(ProfilesVar, "")
 	bin := fakeBin(t, "node")
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT=8080\nONE=true\nNAME=interp\nGREETING=hello world\n"), 0o644)

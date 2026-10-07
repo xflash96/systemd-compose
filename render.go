@@ -311,8 +311,8 @@ func renderService(p *Project, s *Service, opt RenderOptions) (svc Rendered, tim
 		case "Socket":
 			dst = k
 		}
-		for _, k := range sec.Keys {
-			if err := dst.merge(sec.Name, k); err != nil {
+		for _, key := range sec.Keys {
+			if err := dst.merge(sec.Name, key); err != nil {
 				return Rendered{}, nil, nil, err
 			}
 		}
@@ -402,7 +402,7 @@ func execLine(entry, cmd Words, workDir string, search []string) (string, error)
 			continue
 		}
 		program := len(parts) == 0
-		if w.List != nil {
+		if len(w.List) > 0 {
 			words := append([]string(nil), w.List...)
 			if program {
 				abs, err := resolveWord(words[0], workDir, search)

@@ -84,6 +84,7 @@ func TestLoadRefusals(t *testing.T) {
 		{"specifier in a list word", "services: {a: {command: [x, '%z']}}", "not a systemd specifier"},
 		{"no command no raw", "services: {a: {working_dir: .}}", "command: is required"},
 		{"no services", "name: x", "services: is required"},
+		{"unquoted specifier value", "services:\n  a:\n    command: x\n    environment:\n      D: %h/d", "must be quoted in yaml"},
 		{"profiles not a list", "services: {a: {command: x, profiles: debug}}", "non-empty list of names"},
 		{"bad profile name", "services: {a: {command: x, profiles: [-x]}}", "a profile name is"},
 		{"required edge into an inactive profile", "services: {a: {command: x, depends_on: {b: {required: true}}}, b: {command: x, profiles: [data]}}", "add --profile data"},
@@ -160,6 +161,7 @@ services:
 // The project name is the namespace; its sources outside the yaml let two
 // copies of one project coexist without an edit.
 func TestProjectNameSources(t *testing.T) {
+	t.Setenv(ProfilesVar, "")
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigFileName)
 	write := func(y string) {
@@ -223,6 +225,7 @@ func TestFindConfig(t *testing.T) {
 // Profiles: the enabled set is what up renders and the target wants; the
 // declared set, every profile, is what the project owns.
 func TestProfiles(t *testing.T) {
+	t.Setenv(ProjectNameVar, "")
 	t.Setenv(ProfilesVar, "")
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigFileName)

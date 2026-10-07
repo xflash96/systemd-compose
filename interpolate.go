@@ -19,8 +19,11 @@ import (
 // readDotenv reads a .env file: KEY=value lines, # comments and blank lines
 // skipped, an optional "export " prefix. A value is unquoted (trimmed; " #"
 // starts a comment), 'single-quoted' (literal) or "double-quoted" (\n \t
-// \\ \" escapes); unquoted and double-quoted values are interpolated
-// against the keys above them. A missing file is an empty set.
+// \\ \" escapes); a quoted value ends at its closing quote, after which
+// only a # comment may follow, so the quotes never reach the value.
+// A quoted value whose closing quote is on a later line spans those lines,
+// as compose's .env allows. Unquoted and double-quoted values are
+// interpolated against the keys above them. A missing file is an empty set.
 func readDotenv(path string) (map[string]string, error) {
 	vars := map[string]string{}
 	data, err := os.ReadFile(path)
@@ -30,8 +33,9 @@ func readDotenv(path string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
+	lines := strings.Split(string(data), "\n")
+	for i := 0; i < len(lines); i++ {
+		start, line := i, strings.TrimSpace(lines[i])
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -42,20 +46,34 @@ func readDotenv(path string) (map[string]string, error) {
 			return nil, fmt.Errorf("%s:%d: expected KEY=value", path, i+1)
 		}
 		v = strings.TrimSpace(v)
-		switch {
-		case len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'':
-			v = v[1 : len(v)-1]
-		case len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"':
-			v = strings.NewReplacer(`\n`, "\n", `\t`, "\t", `\"`, `"`, `\\`, `\`).Replace(v[1 : len(v)-1])
-			if v, err = interpolate(v, vars); err != nil {
-				return nil, fmt.Errorf("%s:%d: %v", path, i+1, err)
+		expand := true
+		if v != "" && (v[0] == '\'' || v[0] == '"') {
+			quote := v[0]
+			end := closingQuote(v)
+			for end < 0 && i+1 < len(lines) {
+				i++
+				v += "\n" + lines[i]
+				end = closingQuote(v)
 			}
-		default:
-			if c := strings.Index(v, " #"); c >= 0 {
-				v = strings.TrimSpace(v[:c])
+			if end < 0 {
+				return nil, fmt.Errorf("%s:%d: unclosed %c quote", path, start+1, quote)
 			}
+			// What follows the closing quote is a comment or nothing; the
+			// quoted span alone is the value, so the quotes never leak into
+			// it the way a "value" # comment line would otherwise leave them.
+			if tail := strings.TrimSpace(v[end+1:]); tail != "" && !strings.HasPrefix(tail, "#") {
+				return nil, fmt.Errorf("%s:%d: %q after the closing %c quote; quote the whole value or drop the quotes", path, start+1, tail, quote)
+			}
+			v, expand = v[1:end], quote == '"'
+			if quote == '"' {
+				v = strings.NewReplacer(`\n`, "\n", `\t`, "\t", `\"`, `"`, `\\`, `\`).Replace(v)
+			}
+		} else if c := strings.Index(v, " #"); c >= 0 {
+			v = strings.TrimSpace(v[:c])
+		}
+		if expand {
 			if v, err = interpolate(v, vars); err != nil {
-				return nil, fmt.Errorf("%s:%d: %v", path, i+1, err)
+				return nil, fmt.Errorf("%s:%d: %v", path, start+1, err)
 			}
 		}
 		vars[k] = v
@@ -63,17 +81,36 @@ func readDotenv(path string) (map[string]string, error) {
 	return vars, nil
 }
 
-func isVarName(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i, c := range s {
-		if !(c == '_' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || i > 0 && c >= '0' && c <= '9') {
-			return false
+// closingQuote is the index of the quote that closes the one at s[0], or
+// -1. Inside "..." a backslash escapes the next byte, so \" is not it;
+// '...' has no escapes.
+func closingQuote(s string) int {
+	for i := 1; i < len(s); i++ {
+		switch {
+		case s[0] == '"' && s[i] == '\\':
+			i++
+		case s[i] == s[0]:
+			return i
 		}
 	}
-	return true
+	return -1
 }
+
+// varNameLen is how much of s is a variable name: [A-Za-z_][A-Za-z0-9_]*,
+// the one rule for a name here and for an environment key (parseEnvironment).
+// It is where a $VAR or a ${VAR... form ends.
+func varNameLen(s string) int {
+	n := 0
+	for ; n < len(s); n++ {
+		c := s[n]
+		if !(c == '_' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || n > 0 && c >= '0' && c <= '9') {
+			break
+		}
+	}
+	return n
+}
+
+func isVarName(s string) bool { return s != "" && varNameLen(s) == len(s) }
 
 // interpolate expands compose's forms in s: $$ is a literal $; $VAR and
 // ${VAR} are the value; ${VAR:-d} and ${VAR-d} default when unset or empty
@@ -103,10 +140,7 @@ func interpolate(s string, vars map[string]string) (string, error) {
 			b.WriteString(v)
 			i += end + 1
 		default:
-			n := 0
-			for n < len(rest) && isVarName(rest[:n+1]) {
-				n++
-			}
+			n := varNameLen(rest)
 			if n == 0 {
 				return "", fmt.Errorf("a $ that starts no variable in %q; write $$ for a literal dollar", s)
 			}
@@ -138,10 +172,7 @@ func closingBrace(s string) int {
 }
 
 func braced(expr string, vars map[string]string) (string, error) {
-	n := 0
-	for n < len(expr) && isVarName(expr[:n+1]) {
-		n++
-	}
+	n := varNameLen(expr)
 	name, op := expr[:n], expr[n:]
 	if name == "" {
 		return "", fmt.Errorf("${%s}: no variable name", expr)
@@ -210,7 +241,13 @@ func interpolateTree(doc *yaml.Node, vars map[string]string) error {
 			return walk(n.Alias, path)
 		case yaml.MappingNode:
 			for i := 0; i+1 < len(n.Content); i += 2 {
-				p := append(append([]string(nil), path...), n.Content[i].Value)
+				p := path
+				// A merge key is transparent, as yaml makes it: what `<<`
+				// brings in belongs to the enclosing map, so a `unit:`
+				// reached through one is still the service's raw systemd.
+				if key := n.Content[i].Value; key != "<<" {
+					p = append(append([]string(nil), path...), key)
+				}
 				if len(p) == 3 && p[0] == "services" && p[2] == "unit" { // raw systemd
 					continue
 				}

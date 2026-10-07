@@ -68,19 +68,24 @@ func TestWriteUnitKeepsMtime(t *testing.T) {
 	}
 }
 
-// The probe's verdict survives in ExecStartPost= after the unit fails.
+// The probe's verdict survives in ExecStartPost= after the unit fails, and
+// only the probe's entry speaks for it (d: the author's own /bin/false).
 func TestProbeExits(t *testing.T) {
 	out := `Id=a.service
-ExecStartPost={ path=/x ; argv[]=/x probe -- curl ; ignore_errors=no ; start_time=[Fri] ; stop_time=[Fri] ; pid=9 ; code=exited ; status=1 }
+ExecStartPost={ path=/x ; argv[]=/x probe --interval 2s -- curl ; ignore_errors=no ; start_time=[Fri] ; stop_time=[Fri] ; pid=9 ; code=exited ; status=1 }
 
 Id=b.service
-ExecStartPost={ path=/x ; argv[]=/x probe -- curl ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+ExecStartPost={ path=/x ; argv[]=/x probe --interval 2s -- curl ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
 
 Id=c.service
-ExecStartPost={ path=/x ; argv[]=/x ; ignore_errors=no ; start_time=[Fri] ; stop_time=[Fri] ; pid=9 ; code=killed ; status=9/KILL }
+ExecStartPost={ path=/x ; argv[]=/x probe --interval 1s -- t ; ignore_errors=no ; start_time=[Fri] ; stop_time=[Fri] ; pid=9 ; code=killed ; status=9/KILL }
+
+Id=d.service
+ExecStartPost={ path=/x ; argv[]=/x probe --interval 1s -- t ; ignore_errors=no ; start_time=[Fri] ; stop_time=[Fri] ; pid=9 ; code=exited ; status=0 }
+ExecStartPost={ path=/bin/false ; argv[]=/bin/false ; ignore_errors=no ; start_time=[Fri] ; stop_time=[Fri] ; pid=10 ; code=exited ; status=1 }
 `
 	got := parseProbeExits(out)
-	if got["a.service"] != 1 || got["b.service"] != -1 || got["c.service"] != 1 {
+	if got["a.service"] != 1 || got["b.service"] != -1 || got["c.service"] != 1 || got["d.service"] != 0 {
 		t.Errorf("parseProbeExits = %v", got)
 	}
 	cases := []struct {

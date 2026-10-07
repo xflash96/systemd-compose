@@ -207,7 +207,11 @@ func (pr *project) scopeLine() {
 	if len(pr.p.Profiles) > 0 {
 		profiles = fmt.Sprintf(", profiles %s from %s", strings.Join(pr.p.Profiles, ","), pr.p.ProfilesFrom)
 	}
-	fmt.Printf("project %s (%s, name from %s%s): %d units, from %s\n", pr.p.Name, pr.m.ScopeName(), pr.p.NameFrom, profiles, len(pr.p.UnitNames()), pr.p.ConfigPath)
+	units := fmt.Sprintf("%d units", len(pr.p.UnitNames()))
+	if n := len(pr.p.DeclaredNames()); n != len(pr.p.UnitNames()) {
+		units = fmt.Sprintf("%d of %d units", len(pr.p.UnitNames()), n)
+	}
+	fmt.Printf("project %s (%s, name from %s%s): %s, from %s\n", pr.p.Name, pr.m.ScopeName(), pr.p.NameFrom, profiles, units, pr.p.ConfigPath)
 }
 
 // unitsFor maps service names to the units start, stop or restart acts on.
@@ -512,7 +516,8 @@ func (pr *project) up(args []string) error {
 		st := before[u.Name]
 		svc := pr.serviceByUnit(u.Name)
 		// A listening service's socket is restartable too: try-restart on it
-		// rebinds a changed address and, through PartOf=, restarts the service.
+		// rebinds a changed address and, through the service's
+		// Requires=<svc>.socket, takes the service along.
 		isRestartable := svc != nil && (pr.p.UnitOf(svc) == u.Name || len(svc.Listen) > 0 && pr.p.SocketUnit(svc) == u.Name)
 		old, err := os.ReadFile(path)
 		switch {

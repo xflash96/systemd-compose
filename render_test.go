@@ -68,6 +68,7 @@ func TestRenderGolden(t *testing.T) {
 // Render-time refusals: things only the filesystem or the merge can decide.
 func TestRenderRefusals(t *testing.T) {
 	t.Setenv(ProjectNameVar, "")
+	t.Setenv(ProfilesVar, "")
 	bin := fakeBin(t, "node", "sh")
 	cases := []struct{ name, yaml, want string }{
 		{"newline in command", "services:\n  a:\n    command: \"node x\\nExecStartPre=/bin/rm -rf /\"", "newline"},
@@ -148,6 +149,7 @@ services:
 // The raw ExecStart form renders as given; a second env var concatenates.
 func TestRawFormAndConcat(t *testing.T) {
 	t.Setenv(ProjectNameVar, "")
+	t.Setenv(ProfilesVar, "")
 	bin := fakeBin(t, "node")
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigFileName)

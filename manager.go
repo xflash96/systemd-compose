@@ -146,9 +146,11 @@ func parseStates(out string) (map[string]UnitState, error) {
 	return states, nil
 }
 
-// ProbeExits reads each unit's last ExecStartPost= exit status, which for a
-// service with a healthcheck is the probe's verdict at start: 0 passed, more
-// failed, -1 when none ran. systemd keeps it after the unit fails.
+// ProbeExits reads the last exit status of each unit's healthcheck probe,
+// the ExecStartPost= the renderer writes as "<exe> probe --interval ...":
+// 0 passed, more failed, -1 when none ran. systemd keeps it after the unit
+// fails. Any other ExecStartPost= (the author's, through unit:) is not the
+// probe's verdict and is skipped.
 func (m *Manager) ProbeExits(units []string) (map[string]int, error) {
 	out, err := m.cmd("systemctl", append([]string{"show", "-p", "Id,ExecStartPost"}, units...)...).Output()
 	if err != nil {
@@ -167,8 +169,11 @@ func parseProbeExits(out string) map[string]int {
 			case "Id":
 				id = v
 			case "ExecStartPost":
-				// "{ path=… ; … ; code=exited ; status=1 }"; a killed probe
-				// reads code=killed, one that never ran code=(null).
+				// "{ path=… ; argv[]=… ; … ; code=exited ; status=1 }"; a
+				// killed probe reads code=killed, one that never ran code=(null).
+				if !strings.Contains(v, " probe --interval ") {
+					continue
+				}
 				code := fieldOf(v, "code=")
 				status, _ := strconv.Atoi(strings.SplitN(fieldOf(v, "status="), "/", 2)[0])
 				switch {
@@ -311,7 +316,8 @@ func sweepEmptyWants(unitDir string) {
 }
 
 // splitWords splits a command string into argv under simple quoting. The
-// refusal list has already removed $, % and ;, so this is total.
+// refusal list has already removed % and ;, so this is total; a $ left by
+// interpolation is an ordinary character here and runBuild writes it $$.
 func splitWords(s string) []string {
 	var out []string
 	var cur strings.Builder
