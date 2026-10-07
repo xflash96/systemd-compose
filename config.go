@@ -41,7 +41,8 @@ type Project struct {
 
 type Service struct {
 	Name        string
-	Command     string
+	Command     Words
+	Entrypoint  Words  // ExecStart = entrypoint + command, as compose without an image
 	WorkingDir  string // absolute; defaults to the project dir
 	Environment []KV
 	EnvFiles    []EnvFile
@@ -58,6 +59,25 @@ type Service struct {
 }
 
 type KV struct{ Key, Value string }
+
+// Words is a command in compose's two spellings: a string that systemd
+// parses (Line), or a list with one word per element (List), which the
+// renderer quotes so that spaces, quotes and $ are plain characters.
+type Words struct {
+	Line string
+	List []string
+}
+
+func (w Words) Empty() bool { return w.Line == "" && len(w.List) == 0 }
+
+// program is the first word, the one that names what runs.
+func (w Words) program() string {
+	if w.List != nil {
+		return w.List[0]
+	}
+	first, _, _ := firstWord(w.Line)
+	return first
+}
 
 type EnvFile struct {
 	Path     string // absolute
@@ -359,7 +379,7 @@ func sanitizeName(base string) string {
 }
 
 var serviceKeys = []string{"command", "working_dir", "environment", "env_file", "restart",
-	"depends_on", "schedule", "unit", "on_change", "healthcheck", "oneshot", "build", "resources", "listen"}
+	"depends_on", "schedule", "unit", "on_change", "healthcheck", "oneshot", "build", "resources", "listen", "entrypoint"}
 
 func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 	ctx := "service " + name
@@ -383,20 +403,37 @@ func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 		}
 	}
 	rawExec := svc.Unit.hasKey("Service", "ExecStart")
-	n := m.get("command")
-	switch {
-	case n == nil && !rawExec:
-		return nil, fmt.Errorf("line %d: %s: command: is required (or unit: Service: ExecStart: for the raw form)", node.Line, ctx)
-	case n != nil && rawExec:
-		return nil, fmt.Errorf("line %d: %s: command: and unit: Service: ExecStart: both write ExecStart=; keep one", n.Line, ctx)
-	case n != nil:
-		if svc.Command, err = scalar(n, ctx+": command"); err != nil {
+	progLine := 0 // where the program word is written: entrypoint's, else command's
+	for _, key := range []string{"entrypoint", "command"} {
+		n := m.get(key)
+		if n == nil {
+			continue
+		}
+		if rawExec {
+			return nil, fmt.Errorf("line %d: %s: %s: and unit: Service: ExecStart: both write ExecStart=; keep one", n.Line, ctx, key)
+		}
+		w, err := parseWords(n, ctx+": "+key)
+		if err != nil {
 			return nil, err
 		}
-		if strings.TrimSpace(svc.Command) == "" {
-			return nil, fmt.Errorf("line %d: %s: command: is empty", n.Line, ctx)
+		if progLine == 0 {
+			progLine = n.Line
 		}
-		if err := refuseCommand(svc.Command, ctx+": command", n.Line); err != nil {
+		if key == "command" {
+			svc.Command = w
+		} else {
+			svc.Entrypoint = w
+		}
+	}
+	prog := svc.Entrypoint
+	if prog.Empty() {
+		prog = svc.Command
+	}
+	if prog.Empty() && !rawExec {
+		return nil, fmt.Errorf("line %d: %s: command: is required (or entrypoint:, or unit: Service: ExecStart: for the raw form)", node.Line, ctx)
+	}
+	if !prog.Empty() {
+		if err := refuseProgram(prog.program(), ctx, progLine); err != nil {
 			return nil, err
 		}
 	}
@@ -549,12 +586,26 @@ func refuseCommand(cmd, ctx string, line int) error {
 	if err != nil {
 		return fmt.Errorf("line %d: %s: %v", line, ctx, err)
 	}
+	if err := refuseProgram(first, ctx, line); err != nil {
+		return err
+	}
+	return refuseLine(cmd, ctx, line)
+}
+
+// refuseProgram checks the word that names what runs: systemd reads a
+// leading - @ : + ! as a prefix, not as part of the path.
+func refuseProgram(first, ctx string, line int) error {
 	if first == "" {
 		return fmt.Errorf("line %d: %s: no command word", line, ctx)
 	}
 	if strings.ContainsAny(first[:1], "-@:+!") {
 		return fmt.Errorf("line %d: %s: first word %q starts with a character systemd treats as a prefix (- @ : + !); rename the program or use unit: Service: ExecStart:", line, ctx, first)
 	}
+	return nil
+}
+
+// refuseLine checks a string command wherever it stands.
+func refuseLine(cmd, ctx string, line int) error {
 	for _, w := range strings.Fields(cmd) {
 		if w == ";" {
 			return fmt.Errorf("line %d: %s: a bare ; separates ExecStart commands in systemd; one command per service, or use unit: Service: ExecStart:", line, ctx)
@@ -564,6 +615,41 @@ func refuseCommand(cmd, ctx string, line int) error {
 		return fmt.Errorf("line %d: %s: %v", line, ctx, err)
 	}
 	return nil
+}
+
+// parseWords reads command: or entrypoint:, a string or a list of words.
+func parseWords(n *yaml.Node, ctx string) (Words, error) {
+	if n.Kind == yaml.SequenceNode {
+		if len(n.Content) == 0 {
+			return Words{}, fmt.Errorf("line %d: %s: is empty", n.Line, ctx)
+		}
+		var w Words
+		for _, item := range n.Content {
+			s, err := scalar(item, ctx)
+			if err != nil {
+				return Words{}, err
+			}
+			if err := specifiers(s); err != nil {
+				return Words{}, fmt.Errorf("line %d: %s: %v", item.Line, ctx, err)
+			}
+			w.List = append(w.List, s)
+		}
+		return w, nil
+	}
+	s, err := scalar(n, ctx)
+	if err != nil {
+		return Words{}, err
+	}
+	if strings.TrimSpace(s) == "" {
+		return Words{}, fmt.Errorf("line %d: %s: is empty", n.Line, ctx)
+	}
+	if _, _, err := firstWord(s); err != nil {
+		return Words{}, fmt.Errorf("line %d: %s: %v", n.Line, ctx, err)
+	}
+	if err := refuseLine(s, ctx, n.Line); err != nil {
+		return Words{}, err
+	}
+	return Words{Line: s}, nil
 }
 
 // firstWord returns the first word of a command under systemd's quoting:

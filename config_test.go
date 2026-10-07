@@ -74,6 +74,13 @@ func TestLoadRefusals(t *testing.T) {
 		{"specifier in env_file", "services: {a: {command: x, env_file: '%h/.env'}}", "must be literal"},
 		{"bad directive name", "services: {a: {command: x, unit: {Service: {'Timeout Stop': 1}}}}", "not a directive name"},
 		{"command and raw ExecStart", "services: {a: {command: x, unit: {Service: {ExecStart: /bin/sh -c x}}}}", "keep one"},
+		{"entrypoint and raw ExecStart", "services: {a: {entrypoint: x, unit: {Service: {ExecStart: /bin/sh -c x}}}}", "keep one"},
+		{"empty command list", "services: {a: {command: []}}", "is empty"},
+		{"empty entrypoint", "services: {a: {entrypoint: '', command: x}}", "is empty"},
+		{"prefix in a list program", "services: {a: {command: [-x, y]}}", "starts with a character"},
+		{"prefix in the entrypoint", "services: {a: {entrypoint: '@x', command: y}}", "starts with a character"},
+		{"empty program word", "services: {a: {command: ['', y]}}", "no command word"},
+		{"specifier in a list word", "services: {a: {command: [x, '%z']}}", "not a systemd specifier"},
 		{"no command no raw", "services: {a: {working_dir: .}}", "command: is required"},
 		{"no services", "name: x", "services: is required"},
 		{"empty services", "services: {}", "services: is empty"},
@@ -138,7 +145,7 @@ services:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Services[0].Command != "" || !p.Services[0].Unit.hasKey("Service", "ExecStart") {
+	if !p.Services[0].Command.Empty() || !p.Services[0].Unit.hasKey("Service", "ExecStart") {
 		t.Errorf("raw ExecStart not carried: %+v", p.Services[0])
 	}
 	if p.Services[0].Healthcheck.Interval != "1h30min" {

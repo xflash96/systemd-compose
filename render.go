@@ -225,12 +225,16 @@ func renderService(p *Project, s *Service, opt RenderOptions) (svc Rendered, tim
 			u.add("Service", "EnvironmentFile", "-"+ef.Path)
 		}
 	}
-	if s.Command != "" {
-		cmd, err := resolveCommand(s.Command, s.WorkingDir, opt.SearchPath)
+	if !s.Command.Empty() || !s.Entrypoint.Empty() {
+		line, err := execLine(s.Entrypoint, s.Command, s.WorkingDir, opt.SearchPath)
 		if err != nil {
 			return Rendered{}, nil, nil, fmt.Errorf("command: %w", err)
 		}
-		u.own("Service", "ExecStart", execLiteral(cmd), "command")
+		owner := "command"
+		if !s.Entrypoint.Empty() {
+			owner = "entrypoint"
+		}
+		u.own("Service", "ExecStart", line, owner)
 	}
 	if h := s.Healthcheck; h != nil {
 		test, err := resolveArgv(h.Test, s.WorkingDir, opt.SearchPath)
@@ -381,6 +385,43 @@ func envFileHash(files []EnvFile) string {
 
 // ---- command resolution ---------------------------------------------------
 
+// execLine renders entrypoint then command as one ExecStart= value: a
+// string as systemd will parse it, a list quoted word by word, the first
+// word resolved to an absolute path, every $ left by interpolation kept.
+func execLine(entry, cmd Words, workDir string, search []string) (string, error) {
+	var parts []string
+	for _, w := range []Words{entry, cmd} {
+		if w.Empty() {
+			continue
+		}
+		program := len(parts) == 0
+		if w.List != nil {
+			words := append([]string(nil), w.List...)
+			if program {
+				abs, err := resolveWord(words[0], workDir, search)
+				if err != nil {
+					return "", err
+				}
+				words[0] = abs
+			}
+			for i, x := range words {
+				words[i] = quoteWord(execLiteral(x))
+			}
+			parts = append(parts, strings.Join(words, " "))
+			continue
+		}
+		line := w.Line
+		if program {
+			var err error
+			if line, err = resolveCommand(line, workDir, search); err != nil {
+				return "", err
+			}
+		}
+		parts = append(parts, execLiteral(line))
+	}
+	return strings.Join(parts, " "), nil
+}
+
 // resolveCommand replaces the first word of cmd with an absolute path found
 // on the search path (or relative to workDir when it contains a slash) and
 // refuses when nothing is found: the unit must not depend on the manager's
@@ -389,6 +430,9 @@ func resolveCommand(cmd, workDir string, search []string) (string, error) {
 	first, quoted, err := firstWord(cmd)
 	if err != nil {
 		return "", err
+	}
+	if strings.ContainsAny(first, " \t\"'\\") {
+		return "", fmt.Errorf("%q: a program path with whitespace or quotes in a string command needs systemd quoting; give command: as a list instead", first)
 	}
 	abs, err := resolveWord(first, workDir, search)
 	if err != nil {
@@ -415,9 +459,6 @@ func resolveArgv(argv []string, workDir string, search []string) ([]string, erro
 func resolveWord(word, workDir string, search []string) (string, error) {
 	if word == "" {
 		return "", fmt.Errorf("empty command")
-	}
-	if strings.ContainsAny(word, " \t\"'\\") {
-		return "", fmt.Errorf("%q: a program path with whitespace or quotes needs systemd quoting, which is refused here; use unit: Service: ExecStart:", word)
 	}
 	if strings.Contains(word, "%") {
 		// systemd expands it at load; systemd-analyze verify --user, which

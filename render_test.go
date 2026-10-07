@@ -264,3 +264,34 @@ services: {a: {command: "%h/bin/tool --sock %t/x.sock", environment: {RT: "%t/rt
 		}
 	}
 }
+
+// compose's two spellings: a list is quoted word by word, entrypoint comes
+// first, and only the program word must look like a program.
+func TestCommandForms(t *testing.T) {
+	bin := fakeBin(t, "node")
+	spaced := filepath.Join(t.TempDir(), "my bin")
+	os.MkdirAll(spaced, 0o755)
+	os.WriteFile(filepath.Join(spaced, "tool"), []byte("#!/bin/sh\n"), 0o755)
+	cases := map[string]string{
+		`{command: [node, "a b", 'say "hi"', "$$HOME", "%t/s", ""]}`:            bin + `/node "a b" "say \"hi\"" $$HOME %t/s ""`,
+		`{entrypoint: "node --inspect", command: [server.mjs, --port, "8080"]}`: bin + "/node --inspect server.mjs --port 8080",
+		`{entrypoint: [node], command: "-e 'x'"}`:                               bin + "/node -e 'x'",
+		`{entrypoint: [node, server.mjs]}`:                                      bin + "/node server.mjs",
+		`{command: ["` + filepath.Join(spaced, "tool") + `", x]}`:               `"` + filepath.Join(spaced, "tool") + `" x`,
+	}
+	for svc, want := range cases {
+		p, err := loadYAML(t, "name: cf\nservices: {a: "+svc+"}")
+		if err != nil {
+			t.Errorf("%s: %v", svc, err)
+			continue
+		}
+		units, err := Render(p, RenderOptions{Exe: "/x", SearchPath: []string{bin}})
+		if err != nil {
+			t.Errorf("%s: %v", svc, err)
+			continue
+		}
+		if !strings.Contains(units[1].Text, "ExecStart="+want+"\n") {
+			t.Errorf("%s: want ExecStart=%s in\n%s", svc, want, units[1].Text)
+		}
+	}
+}

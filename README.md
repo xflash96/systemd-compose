@@ -110,7 +110,8 @@ tool reads those paths itself.
 
 | key | renders to |
 |---|---|
-| `command` | `ExecStart=`, systemd's own parsing; the first word is resolved to an absolute path at render time, against `~/.local/bin` and your `PATH`, and refused if not found; nothing else from your shell reaches the service. A program given through a specifier (`%h/bin/tool`) is left to systemd, and the verify gate refuses it if it does not exist. For a shell or a program path with a space, omit it and write `unit: Service: ExecStart:` yourself |
+| `command` | `ExecStart=`. A string is parsed by systemd itself; a list is one word per element, quoted for you, so spaces, quotes and `$` are plain characters. The first word is resolved to an absolute path at render time, against `~/.local/bin` and your `PATH`, and refused if not found; nothing else from your shell reaches the service. A program given through a specifier (`%h/bin/tool`) is left to systemd, and the verify gate refuses it if it does not exist. For a shell, write it out (`[sh, -c, ...]`); the raw form is `unit: Service: ExecStart:` |
+| `entrypoint` | a string or a list put in front of `command`, as compose does when there is no image to override |
 | `working_dir` | `WorkingDirectory=`, default the project directory |
 | `environment` | `Environment=` lines; `$` is literal, `%` a specifier (above); a bare `KEY` is refused, nothing is captured from your shell |
 | `env_file` | `EnvironmentFile=`; a change to the file is a change to the unit |
