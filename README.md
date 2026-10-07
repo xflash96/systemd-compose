@@ -13,14 +13,28 @@ names the system instance, and running as root defaults to it. Nothing is
 reinvented: systemd owns the processes, the journal owns the logs, and every
 verb is a few `systemctl` calls you could type yourself.
 
-One static Go binary, no runtime dependency. Linux with systemd 248 or later;
-CI runs it on 249 and 255. Each release has the binary for amd64 and arm64
-on the [releases page](https://github.com/xflash96/systemd-compose/releases);
-or build it:
+One static Go binary, no runtime dependency. Linux with systemd 248 or later
+(what its features need; tested on 249 and 255). Each release has a tarball
+for amd64 and arm64, and SHA256SUMS, on the
+[releases page](https://github.com/xflash96/systemd-compose/releases):
 
 ```
-./install            # -> ~/.local/bin/systemd-compose (needs a Go toolchain)
+sha256sum -c --ignore-missing SHA256SUMS
+tar xzf systemd-compose_*_linux_amd64.tar.gz       # arm64 alike
+mkdir -p ~/.local/bin && cp systemd-compose_*_linux_amd64/systemd-compose ~/.local/bin/
+```
+
+or build it from a checkout, with a Go toolchain:
+
+```
+./install            # -> ~/.local/bin/systemd-compose
+```
+
+Either way:
+
+```
 alias sc=systemd-compose
+sc --version         # this program's version, then systemd's
 ```
 
 ## A project
@@ -63,7 +77,10 @@ services:
 ```
 
 ```
-sc up          # render, verify, register, start; restart what changed
+sc up          # render, verify, build what creates: says is missing,
+               # register, start; restart what changed
+sc up --dry-run # the plan, and any refusal; nothing built or written
+sc build api   # rerun api's build: steps (up --build: every service's)
 sc ps          # the project's units
 sc logs -f api # journalctl, scoped; compose's --tail, --since 10m, -t and
                # --no-log-prefix work too
@@ -159,7 +176,7 @@ tool reads those paths itself.
 | `healthcheck` | an `ExecStartPost=` probe; the unit is not "started" until it passes, so dependents wait. `ps` shows the verdict in a HEALTH column: `starting`, `ready`, `probe failed` |
 | `oneshot` | `Type=oneshot`, `RemainAfterExit=yes`; a job dependents can wait for |
 | `schedule` | a `.timer` (`OnCalendar=`, `Persistent=yes`, `AccuracySec=10s`) driving a oneshot service. Runs never overlap: the ticks that fall during a run collapse into one run that starts when it ends |
-| `build` | not rendered: steps run at `up` (when `creates:`, relative to `working_dir`, is missing) or `build`, in the service's own environment |
+| `build` | not rendered: steps that `build` runs, and `up` runs as [What `up` does](#what-up-does) step 3 says, in the service's own environment (the slice: [One-off commands](#one-off-commands)) |
 | `resources` | `MemoryMax=`, `CPUQuota=`, `TasksMax=`; at project level, on the slice, where a change applies in place and restarts nothing |
 | `on_change` | `restart` (default) or `start-only`: `up` never restarts it |
 | `listen` | socket activation: a `<project>-<service>.socket` with one `ListenStream=` per address (a port, `host:port`, a path relative to this file, `@abstract`), for a program that takes its sockets from `LISTEN_FDS`. `up` starts the socket and the service together; `stop` stops both, so no connection restarts it; `restart` keeps the socket open, and connections wait in its backlog. A changed address restarts both |
@@ -171,9 +188,16 @@ tool reads those paths itself.
    a staging directory. Any output refuses: a misspelled directive is a
    warning systemd would otherwise ignore.
 2. Prints the plan: per unit `new`, `unchanged`, `changed`, or one of the two
-   kinds of changed explained in step 4, and what will happen. `up
-   --dry-run` stops here, having written nothing.
-3. Runs `build` steps whose `creates:` path is missing.
+   kinds of changed explained in step 4, and what will happen; the builds
+   step 3 will run, skip or find up to date; each orphan step 5 will retire.
+   Without `--force`, an active orphan's row says `refused without --force`
+   and `up` refuses, before anything is built or written. `up --dry-run`
+   stops here, having written nothing, with the same plan and refusal.
+3. Runs `build` steps whose `creates:` path (relative to `working_dir`, or
+   absolute) is missing; a build without `creates:` is skipped, and `up
+   --build` runs every one. They run in the project's slice, registered
+   and loaded with the new limits first; if a build fails, those limits
+   stay, on the running services too, until the next `up` or `down`.
 4. Writes the files into `.systemd-compose/` (which ignores itself in git),
    links them with `systemctl --user link`, enables the target, starts
    everything, and `try-restart`s the changed units; a unit that fails to
@@ -186,7 +210,7 @@ tool reads those paths itself.
    touching a file in `.systemd-compose/` restarts its unit at the next
    `up`.)
 5. Retires units registered from this directory that the yaml no longer
-   declares. An active one is refused unless `--force`. When step 4 fails,
+   declares (an active one only with `--force`, step 2). When step 4 fails,
    `up` stops before this; the next `up` or `down` retires them. A socket or
    timer that a service still in the yaml dropped (its `listen:` or
    `schedule:` removed) is part of that service's change instead: never
@@ -208,14 +232,18 @@ retired orphan's file goes.
 ## One-off commands
 
 `run SERVICE [CMD...]` runs a command as a transient unit in the service's
-working directory, environment, env files and slice, and returns its exit
-code; with no command it runs the service's own, so `run backup` fires a
-scheduled job now. `exec SERVICE CMD...` is the same with the command
+working directory, environment and env files, and returns its exit code;
+with no command it runs the service's own, so `run backup` fires a scheduled
+job now. `exec SERVICE CMD...` is the same with the command
 required. `-e KEY=VAL`, `-w DIR` and `-T` (no terminal) are compose's; a
 terminal gets a pty. Once `up` has registered the service, the environment
-and command are the ones systemd runs it with, specifiers expanded; before
-that they come from the yaml, which may then use no specifier. Nothing else
-is started: dependencies are `up`'s business (compose's `--no-deps`).
+and command are the ones systemd runs it with, specifiers expanded;
+otherwise (before the first `up`, or after a `down`) they come from the
+yaml, which may then use no specifier. `run`,
+`exec` and `build` run in the project's slice while the project is
+registered (from `up` until `down`), under the limits the last `up`
+loaded, and outside it otherwise. Nothing else is started: dependencies
+are `up`'s business (compose's `--no-deps`).
 
 ## Overrides outside the yaml
 
@@ -278,9 +306,11 @@ sc -s ps                # the system instance, explicitly
 ```
 ci/unit                # gofmt, vet and the suite; no systemd needed
 ci/live                # a throwaway project through your user manager; nothing left behind
-ci/container [24.04]   # ci/live in a container booting systemd 249 (or 255); docker 28+
+ci/container [24.04]   # ci/live in a container booting systemd 249 (or 255)
 ci/release v0.1.0      # the release tarballs and SHA256SUMS, into dist/
 ```
+
+Each script's header says what it needs and what it checks.
 
 ## License
 

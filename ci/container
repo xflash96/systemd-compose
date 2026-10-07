@@ -3,16 +3,18 @@
 # as an unprivileged user with lingering on: another systemd version on
 # this machine, without a CI runner.
 #
-#   ci/container          Ubuntu 22.04 (systemd 249, the oldest LTS here)
+#   ci/container          Ubuntu 22.04 (systemd 249, the oldest tested)
 #   ci/container 24.04    Ubuntu 24.04 (systemd 255)
 #
-# Needs docker 28 or later (writable-cgroups) with cgroup v2. Never
+# Needs docker 28 or later (writable-cgroups) with cgroup v2, and Go. Never
 # --privileged: it hands the container the host's devices and /proc/sys,
-# which the image's systemd then treats as its own (a getty on the host's
-# console, sysctl on the host's kernel). The entrypoint refuses to boot if
-# it can see a virtual console or write /proc/sys. The container is
-# removed when this script exits; if the script is stopped or killed
-# first, the container powers itself off after 15 minutes.
+# and the image's systemd takes them for its own: its getty runs on the
+# host's console, and its sysctl and binfmt units' conditions pass too.
+# The entrypoint refuses to boot if it can see
+# a virtual console or write /proc/sys. The script removes the container
+# when it exits (not --rm, so a failed boot's log survives to be printed);
+# if the script is stopped or killed first, the container powers itself
+# off after 15 minutes.
 set -euo pipefail
 ver=${1:-22.04}
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -31,7 +33,7 @@ trap cleanup EXIT
 docker build -q -t "$img" - >/dev/null <<EOF
 FROM ubuntu:$ver
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      systemd systemd-sysv dbus dbus-user-session ca-certificates \
+      systemd systemd-sysv dbus dbus-user-session \
  && rm -rf /var/lib/apt/lists/* \
  && useradd -m -s /bin/bash tester
 RUN printf '[Service]\nType=oneshot\nExecStart=/bin/systemctl --no-block poweroff\n' \
@@ -48,7 +50,8 @@ cid=$(docker run -d --cgroupns=private --security-opt writable-cgroups=true \
 	-v "$work/systemd-compose:/usr/local/bin/systemd-compose:ro" \
 	-v "$here/ci/live:/usr/local/bin/ci-live:ro" "$img")
 
-# Boot, then the tester's user manager through lingering.
+# Boot, then the tester's user manager through lingering (ci/live waits
+# for it).
 for _ in $(seq 60); do
 	state=$(docker exec "$cid" systemctl is-system-running 2>/dev/null || true)
 	case $state in running | degraded) break ;; esac
@@ -60,10 +63,8 @@ for _ in $(seq 60); do
 done
 docker exec "$cid" loginctl enable-linger tester
 uid=$(docker exec "$cid" id -u tester)
-for _ in $(seq 60); do
-	docker exec "$cid" systemctl is-active -q "user@$uid.service" && break
-	sleep 1
-done
 
+# The junk overrides prove ci/live clears them (it would rename its project).
 docker exec -u tester -w /home/tester -e XDG_RUNTIME_DIR="/run/user/$uid" \
+	-e SYSTEMD_COMPOSE_PROJECT_NAME=ci_junk -e SYSTEMD_COMPOSE_PROFILES=ci_junk \
 	-e SC=/usr/local/bin/systemd-compose "$cid" /usr/local/bin/ci-live

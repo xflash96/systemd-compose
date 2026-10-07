@@ -37,11 +37,13 @@ NAME (repeatable), else SYSTEMD_COMPOSE_PROFILES (comma list) from the
 environment or the .env; * is all. down and stop take every profile.
 
   up [--dry-run] [--build] [--force] [--force-recreate|--no-recreate]
-                           render, verify, register and start the project;
+                           render, verify, build what creates: says is
+                           missing, register and start the project;
                            restart what changed (on_change: start-only warns);
                            --force-recreate restarts every running service,
                            --no-recreate none; --force retires active orphans;
-                           --dry-run prints the plan and stops
+                           --build runs every build:, creates: or not;
+                           --dry-run prints the plan (and any refusal) and stops
   down                     stop and unregister every unit, and retire what an
                            older yaml left registered; the current files stay
   ps                       the project's units and their state
@@ -158,7 +160,8 @@ parsed:
 		fmt.Print(help)
 		return nil
 	case "version", "--version":
-		return printVersion()
+		printVersion()
+		return nil
 	case "probe":
 		return probe(args)
 	case "ls":
@@ -699,23 +702,27 @@ func (pr *project) up(args []string) error {
 			idle = append(idle, n)
 		}
 	}
-	var builds []*Service
+	var builds, skipped, done []*Service
 	for _, s := range pr.p.EnabledServices() {
 		if s.Build == nil {
 			continue
 		}
-		creates := s.Build.Creates
-		if creates != "" && !filepath.IsAbs(creates) {
-			creates = filepath.Join(s.WorkingDir, creates)
-		}
-		if buildAll || creates == "" || !exists(creates) {
-			if s.Build.Creates == "" && !buildAll {
-				fmt.Printf("  build %s: skipped, no creates: (run `systemd-compose build %s` or `up --build`)\n", s.Name, s.Name)
-				continue
-			}
+		switch creates := s.Build.Creates; {
+		case buildAll || creates != "" && !exists(creates):
 			builds = append(builds, s)
+		case creates == "":
+			skipped = append(skipped, s)
+		default:
+			done = append(done, s)
 		}
 	}
+	// The plan's rows: each naming a unit starts with two spaces and the
+	// unit ("  <unit> <label> <actions>"; "profile not active" for an idle
+	// one; an orphan's is "  <unit> orphan ACTIVE|inactive, <why>: <fate>"),
+	// each build row with "  build <service>: " and "N step(s)", "skipped"
+	// or "up to date". ci/live's checks marked "row grammar" read them.
+	// Every row prints before the orphan refusal (verify and name
+	// collisions refuse before the plan).
 	for _, r := range rows {
 		act := "-"
 		if len(r.actions) > 0 {
@@ -726,9 +733,28 @@ func (pr *project) up(args []string) error {
 	for _, n := range idle {
 		fmt.Printf("  %-32s %-22s %s\n", n, "profile not active", "left as is, out of the boot set")
 	}
+	for _, s := range builds {
+		fmt.Printf("  build %s: %d step(s)\n", s.Name, len(s.Build.Run))
+	}
+	for _, s := range skipped {
+		fmt.Printf("  build %s: skipped, no creates: (run `systemd-compose build %s` or `up --build`)\n", s.Name, s.Name)
+	}
+	for _, s := range done {
+		fmt.Printf("  build %s: up to date, %s exists (`up --build` reruns it)\n", s.Name, s.Build.Creates)
+	}
+	// An active orphan up may not retire refuses the whole up; its row
+	// says so, and the others say they are left as they are.
+	blocks := func(o orphan) bool { return o.active && !force && o.shedBy == "" }
+	var refused string
+	for _, o := range orphans {
+		if blocks(o) {
+			refused = o.unit
+			break
+		}
+	}
 	var shed, gone []orphan
 	for _, o := range orphans {
-		state, why := "inactive", "not in the yaml"
+		state, why, fate := "inactive", "not in the yaml", "will be disabled and removed"
 		if o.active {
 			state = "ACTIVE"
 		}
@@ -738,13 +764,16 @@ func (pr *project) up(args []string) error {
 		} else {
 			gone = append(gone, o)
 		}
-		fmt.Printf("  %-32s orphan     %s, %s: will be disabled and removed\n", o.unit, state, why)
-		if o.active && !force && o.shedBy == "" {
-			return fmt.Errorf("orphan %s is active; stop it first (systemd-compose stop is by service name; use systemctl --user stop %s) or pass --force", o.unit, o.unit)
+		switch {
+		case blocks(o):
+			fate = "refused without --force"
+		case refused != "":
+			fate = "left as is: up is refused"
 		}
+		fmt.Printf("  %-32s orphan     %s, %s: %s\n", o.unit, state, why, fate)
 	}
-	for _, s := range builds {
-		fmt.Printf("  build %s: %d step(s)\n", s.Name, len(s.Build.Run))
+	if refused != "" {
+		return fmt.Errorf("orphan %s is active; stop it first (systemd-compose stop is by service name; use systemctl --user stop %s) or pass --force", refused, refused)
 	}
 	if dryRun {
 		fmt.Println("dry run: nothing built, written, registered, started or retired")
@@ -763,8 +792,33 @@ func (pr *project) up(args []string) error {
 		return err
 	}
 
-	// Act, in order: build, reset-failed, write, link, enable the target,
-	// start everything, restart what changed, retire orphans.
+	// Act, in order: the slice (when there are builds), build,
+	// reset-failed, write, link, enable the target, retire the sockets and
+	// timers a service shed, start everything, restart what changed, retire
+	// the other orphans, sweep emptied .wants directories.
+	//
+	// Builds run in the project's slice, under its limits (sliceProp), so
+	// with builds to run the slice goes first, written, linked and
+	// reloaded: registered on a first up (or the first after a down), and
+	// loaded with this render's text on any up. Reloading only when the
+	// file changed would miss a slice file an interrupted up wrote but
+	// never loaded; one reload is small beside a build. A build that then
+	// fails leaves the slice so; the next up or down settles it.
+	if len(builds) > 0 {
+		for _, u := range pr.rendered {
+			if u.Name != pr.p.SliceName() {
+				continue
+			}
+			path := filepath.Join(pr.renderDir, u.Name)
+			if err := writeUnit(path, u.Text); err != nil {
+				return err
+			}
+			if err := pr.m.LinkLoaded(path); err != nil {
+				return fmt.Errorf("link: %w", err)
+			}
+			break
+		}
+	}
 	for _, s := range builds {
 		if err := pr.runBuild(s); err != nil {
 			return fmt.Errorf("build %s: %w", s.Name, err)
@@ -1136,6 +1190,14 @@ func (pr *project) runBuild(s *Service) error {
 	if err := pr.render(); err != nil {
 		return err
 	}
+	unitDir, err := pr.m.UnitDir()
+	if err != nil {
+		return err
+	}
+	slice, err := pr.sliceProp(unitDir)
+	if err != nil {
+		return err
+	}
 	for i, step := range s.Build.Run {
 		cmd, err := resolveCommand(step, s.WorkingDir, pr.opt.SearchPath)
 		if err != nil {
@@ -1145,7 +1207,7 @@ func (pr *project) runBuild(s *Service) error {
 		args := []string{pr.m.scope(), "--wait", "--pipe", "--collect", "--quiet",
 			"--description=" + pr.p.Name + ": build " + s.Name,
 			"-p", "WorkingDirectory=" + s.WorkingDir}
-		args = append(args, pr.sliceProp()...)
+		args = append(args, slice...)
 		// systemd-run -p is literal: no specifiers (refused at load), and
 		// %% would arrive as two percent signs.
 		env := make([]KV, 0, len(s.Environment))
@@ -1280,12 +1342,12 @@ func listProjects(m *Manager) error {
 
 // runOneOff runs a command in a service's environment through a transient
 // unit, as build steps run: its working directory, environment, env files
-// and slice; with no command, run runs the service's own. A service this
-// project registered lends what systemd runs it with, read over D-Bus
-// (specifiers expanded); one never brought up lends the yaml's, which then
-// may hold no specifier, since systemd-run -p passes values literally. No
-// dependency is started (compose's --no-deps); the exit code is the
-// command's.
+// and, while the project is registered, its slice (sliceProp); with no
+// command, run runs the service's own. A service this project registered
+// lends what systemd runs it with, read over D-Bus (specifiers expanded);
+// one never brought up lends the yaml's, which then may hold no specifier,
+// since systemd-run -p passes values literally. No dependency is started
+// (compose's --no-deps); the exit code is the command's.
 func (pr *project) runOneOff(verb string, args []string) error {
 	var extra []string // -e KEY=VAL
 	workdir, pipe := "", false
@@ -1419,7 +1481,11 @@ flags:
 	runArgs := []string{pr.m.scope(), "--wait", "--collect", "--quiet",
 		"--description=" + pr.p.Name + ": " + verb + " " + s.Name,
 		"-p", "WorkingDirectory=" + workdir}
-	runArgs = append(runArgs, pr.sliceProp()...)
+	slice, err := pr.sliceProp(unitDir)
+	if err != nil {
+		return fmt.Errorf("%s: %w", verb, err)
+	}
+	runArgs = append(runArgs, slice...)
 	if pipe || !terminal(os.Stdin) || !terminal(os.Stdout) {
 		runArgs = append(runArgs, "--pipe")
 	} else {
@@ -1453,16 +1519,20 @@ flags:
 }
 
 // sliceProp puts a build or run unit in the project's slice once the slice
-// is registered, so the project's limits apply to it. Before that, the
-// slice would be one systemd makes on demand, which nothing ever stops: it
-// would stay active and empty after the run, and it carries no limits
-// anyway.
-func (pr *project) sliceProp() []string {
-	unitDir, err := pr.m.UnitDir()
-	if err != nil || pr.registrationOf(unitDir, pr.p.SliceName()).kind != "ours" {
-		return nil
+// is registered, so the project's limits apply to it (up registers it ahead
+// of its builds). Before that, the slice would be one systemd makes on
+// demand, which nothing ever stops: it would stay active and empty after the
+// run, and it carries no limits anyway. A slice another owner
+// holds is refused, as every verb refuses a unit that is not ours.
+func (pr *project) sliceProp(unitDir string) ([]string, error) {
+	switch r := pr.registrationOf(unitDir, pr.p.SliceName()); r.kind {
+	case "ours":
+		return []string{"-p", "Slice=" + pr.p.SliceName()}, nil
+	case "none":
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("%s is %s; this project does not own it", pr.p.SliceName(), r.owner)
 	}
-	return []string{"-p", "Slice=" + pr.p.SliceName()}
 }
 
 // envProps spells a service's environment and env files as systemd-run -p

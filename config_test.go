@@ -7,10 +7,30 @@ import (
 	"testing"
 )
 
+// overrideVars are the tool's own environment overrides (config.go's rule).
+var overrideVars = []string{ProjectNameVar, ProfilesVar}
+
+// TestMain sets them to junk for this package's tests, whatever the
+// caller's shell holds, so a test that loads a project without
+// clearOverrides fails rather than passing by luck.
+func TestMain(m *testing.M) {
+	for _, v := range overrideVars {
+		os.Setenv(v, "ci_junk")
+	}
+	os.Exit(m.Run())
+}
+
+// clearOverrides keeps the tool's own environment overrides out of a test.
+func clearOverrides(t *testing.T) {
+	t.Helper()
+	for _, v := range overrideVars {
+		t.Setenv(v, "")
+	}
+}
+
 func loadYAML(t *testing.T, y string) (*Project, error) {
 	t.Helper()
-	t.Setenv(ProjectNameVar, "") // the tool's own overrides must not leak into its tests
-	t.Setenv(ProfilesVar, "")
+	clearOverrides(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigFileName)
 	if err := os.WriteFile(path, []byte(strings.TrimSpace(y)+"\n"), 0o644); err != nil {
@@ -23,6 +43,7 @@ func TestLoadRefusals(t *testing.T) {
 	cases := []struct{ name, yaml, want string }{
 		{"unknown top-level key", "format: 3\nservices: {a: {command: x}}", `unknown key "format"`},
 		{"version key by habit", "version: \"3.8\"\nservices: {a: {command: x}}", "no version key"},
+		{"specifier in creates", "services: {a: {command: x, build: {run: [x], creates: \"%t/out\"}}}", "creates: no % here"},
 		{"healthy with required false", "services: {a: {command: x, depends_on: {b: {condition: service_healthy, required: false}}}, b: {command: x, healthcheck: {test: [x]}}}", "would not enforce"},
 		{"unknown service key", "services: {a: {command: x, ports: [80]}}", `unknown key "ports"`},
 		{"dashed project name", "name: my-proj\nservices: {a: {command: x}}", "no dash"},
@@ -163,7 +184,7 @@ services:
 // The project name is the namespace; its sources outside the yaml let two
 // copies of one project coexist without an edit.
 func TestProjectNameSources(t *testing.T) {
-	t.Setenv(ProfilesVar, "")
+	clearOverrides(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigFileName)
 	write := func(y string) {
@@ -172,7 +193,6 @@ func TestProjectNameSources(t *testing.T) {
 		}
 	}
 	write("services: {a: {command: x}}\n")
-	t.Setenv(ProjectNameVar, "")
 	p, err := Load(path, Options{})
 	if err != nil || p.NameFrom != "directory" || p.Name != sanitizeName(filepath.Base(dir)) {
 		t.Fatalf("directory: %v %+v", err, p)
@@ -227,8 +247,7 @@ func TestFindConfig(t *testing.T) {
 // Profiles: the enabled set is what up renders and the target wants; the
 // declared set, every profile, is what the project owns.
 func TestProfiles(t *testing.T) {
-	t.Setenv(ProjectNameVar, "")
-	t.Setenv(ProfilesVar, "")
+	clearOverrides(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigFileName)
 	os.WriteFile(path, []byte(`name: pf
@@ -297,8 +316,7 @@ func TestRestartUnlessStopped(t *testing.T) {
 // win, the earlier of two sources wins), interpolation reaches a merged
 // value, and a merged unit: stays raw systemd.
 func TestExtensionsAndMerges(t *testing.T) {
-	t.Setenv(ProjectNameVar, "")
-	t.Setenv(ProfilesVar, "")
+	clearOverrides(t)
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT=8080\n"), 0o644)
 	path := filepath.Join(dir, ConfigFileName)
@@ -372,8 +390,7 @@ func TestTopLevelMerge(t *testing.T) {
 // one stays raw, an unused one is never read, and a service merely named
 // x-something is a service like any other.
 func TestExtensionExpandedWhereUsed(t *testing.T) {
-	t.Setenv(ProjectNameVar, "")
-	t.Setenv(ProfilesVar, "")
+	clearOverrides(t)
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT=8080\n"), 0o644)
 	path := filepath.Join(dir, ConfigFileName)
@@ -399,5 +416,38 @@ services:
 	}
 	if api := p.Service("x-api"); api == nil || api.Environment[0].Value != "8080" {
 		t.Errorf("a service named x-api is interpolated like any other: %+v", api)
+	}
+}
+
+// up looks for a build's creates: where the build ran, the service's
+// working directory, not the project's; an absolute path stands.
+func TestCreates(t *testing.T) {
+	p, err := loadYAML(t, `
+services:
+  rel: {command: x, working_dir: app, build: {run: [x], creates: dist}}
+  abs: {command: x, build: {run: [x], creates: /opt/out}}
+  none: {command: x, build: {run: [x]}}
+  plain: {command: x}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"rel":   filepath.Join(p.Dir, "app", "dist"),
+		"abs":   "/opt/out",
+		"none":  "",
+		"plain": "",
+	} {
+		s, err := p.Lookup(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		if s.Build != nil {
+			got = s.Build.Creates
+		}
+		if got != want {
+			t.Errorf("%s: creates = %q, want %q", name, got, want)
+		}
 	}
 }

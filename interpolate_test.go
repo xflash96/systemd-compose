@@ -110,8 +110,7 @@ EMPTY=
 // Interpolation through Load: values from .env, keys and unit: untouched,
 // a plain scalar retyped, a literal $ written $$ in ExecStart.
 func TestInterpolationInYaml(t *testing.T) {
-	t.Setenv(ProjectNameVar, "")
-	t.Setenv(ProfilesVar, "")
+	clearOverrides(t)
 	bin := fakeBin(t, "node")
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT=8080\nONE=true\nNAME=interp\nGREETING=hello world\n"), 0o644)

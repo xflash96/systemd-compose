@@ -43,6 +43,12 @@ services:
       api: {condition: service_healthy}
     on_change: start-only               # so no depends_on restart: true here
     restart: always
+  cache:
+    command: node cache.mjs
+    depends_on:
+      db: {}                            # the default edge: After= + Wants=
+      api: {restart: true}              # PartOf=: restarted with api
+      worker: {required: true}          # Requires=, with no condition
   backup:
     command: backup --all
     schedule:

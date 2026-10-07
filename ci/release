@@ -1,44 +1,97 @@
 #!/bin/bash
 # ci/release VERSION [DIR] — the files of a release: for linux amd64 and
-# arm64, a tarball holding the static binary, LICENSE, README.md and the
-# licence files of every module compiled in (Apache-2.0 4(a) and 4(d): a
-# binary carries its dependencies' LICENSE and NOTICE), plus SHA256SUMS.
+# arm64, a tarball holding the static binary, LICENSE, README.md and, under
+# third_party/, the licence files of Go and of every module compiled in
+# (a binary carries its dependencies' LICENSE and NOTICE: Apache-2.0 4(a),
+# 4(d); BSD-3 clause 2), plus SHA256SUMS.
 #
 #   ci/release v0.1.0          -> dist/
-#   ci/release v0.1.0 /tmp/x   -> /tmp/x
+#   ci/release v0.1.0 /tmp/x   -> /tmp/x (new or empty)
 #
-# VERSION is the tag; the binary reports it in --version.
+# CI runs this on a pushed tag and publishes DIR (.github/workflows/ci.yml,
+# the release job).
+#
+# VERSION is the tag, vMAJOR.MINOR.PATCH with an optional -suffix; this
+# check is the gate (ci.yml's tag filter is looser). The tree must be
+# committed and DIR empty, so DIR holds this release and nothing else.
+# Run on linux amd64 or arm64: the binary for this machine, unpacked from
+# its tarball, must report VERSION. Refused too: a README that does not
+# name the tarball's directory, and a module the binary records as
+# compiled in (go version -m) whose licence was not shipped. The same
+# commit and toolchain give the same bytes: file times are the commit's
+# (or SOURCE_DATE_EPOCH), and gzip stores no name or time. Needs Go from
+# go.dev/dl, git, GNU tar, gzip, awk and coreutils.
 set -euo pipefail
 ver=${1:?usage: ci/release VERSION [DIR]}
-case $ver in v[0-9]*) ;; *) echo "ci/release: VERSION is a tag such as v0.1.0, not $ver" >&2; exit 1 ;; esac
+[[ $ver =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "ci/release: VERSION is a tag such as v0.1.0, not $ver" >&2; exit 1; }
 here=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "${2:-$here/dist}"
 out=$(cd "${2:-$here/dist}" && pwd)
+[ -z "$(ls -A "$out")" ] || { echo "ci/release: $out is not empty" >&2; exit 1; }
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 cd "$here"
+changes=$(git status --porcelain) || { echo "ci/release: not a git checkout; a release is built from a commit" >&2; exit 1; }
+[ -z "$changes" ] || { echo "ci/release: the tree has uncommitted changes; a release is built from a commit" >&2; exit 1; }
+epoch=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}
+goroot=$(go env GOROOT)
+for f in LICENSE PATENTS; do
+	[ -f "$goroot/$f" ] || { echo "ci/release: no $f in $goroot (a distribution's Go moves it); use a toolchain from go.dev/dl" >&2; exit 1; }
+done
+host=$(go env GOHOSTOS)/$(go env GOHOSTARCH)
+case $host in linux/amd64 | linux/arm64) ;; *) echo "ci/release: run on linux amd64 or arm64, not $host, so the binary can be checked" >&2; exit 1 ;; esac
 go mod download
-deps=$(go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Dir}}{{end}}{{end}}' . | sort -u)
+tarname() { echo "systemd-compose_${ver#v}_linux_$1"; }
+# README's install lines name the tarball's directory.
+pat=$(tarname amd64)
+grep -qF "${pat/${ver#v}/*}/" README.md || { echo "ci/release: README does not name ${pat/${ver#v}/*}/, the tarball's directory" >&2; exit 1; }
 
 for arch in amd64 arm64; do
-	name=systemd-compose_${ver#v}_linux_$arch
-	d=$work/$name
-	mkdir -p "$d"
-	CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+	name=$(tarname "$arch")
+	d=$work/stage/$name
+	mkdir -p "$d/third_party/go"
+	goenv=(CGO_ENABLED=0 GOOS=linux GOARCH="$arch") # the build and its licence list alike
+	env "${goenv[@]}" go build -trimpath \
 		-ldflags="-s -w -X main.version=$ver" -o "$d/systemd-compose" .
 	cp LICENSE README.md "$d/"
+	cp "$goroot/LICENSE" "$goroot/PATENTS" "$d/third_party/go/"
+	# Per arch: a dependency may be compiled in for one only. Captured
+	# first: a failure inside <(...) would be invisible to set -e.
+	deps=$(env "${goenv[@]}" go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Dir}}{{end}}{{end}}' . | sort -u) ||
+		{ echo "ci/release: go list failed for $arch" >&2; exit 1; }
 	while read -r path dir; do
 		[ -n "$path" ] || continue
-		mkdir -p "$d/third_party/$path"
 		files=$(cd "$dir" && ls | grep -E '^(LICEN[CS]E|NOTICE|COPYING)' || true)
 		if [ -z "$files" ]; then
 			echo "ci/release: $path has no licence file in $dir" >&2
 			exit 1
 		fi
+		mkdir -p "$d/third_party/$path"
 		for f in $files; do cp "$dir/$f" "$d/third_party/$path/"; done
 	done <<<"$deps"
-	tar -C "$work" --sort=name --owner=0 --group=0 --numeric-owner --mode=u+w,go-w,a+rX -czf "$out/$name.tar.gz" "$name"
+	# Cross-checked against what the binary itself records as compiled in;
+	# captured first, since a failing $(...) in a for list escapes set -e.
+	mods=$(go version -m "$d/systemd-compose" | awk '$1 == "dep" {print $2}') ||
+		{ echo "ci/release: go version -m failed on the $arch binary" >&2; exit 1; }
+	for m in $mods; do
+		[ -d "$d/third_party/$m" ] || { echo "ci/release: $m is compiled into the $arch binary, but its licence was not shipped" >&2; exit 1; }
+	done
+	tar -C "$work/stage" --sort=name --owner=0 --group=0 --numeric-owner --mode=u+w,go-w,a+rX \
+		--mtime="@$epoch" -cf - "$name" | gzip -n >"$work/$name.tar.gz"
 done
-(cd "$out" && sha256sum -- systemd-compose_*.tar.gz >SHA256SUMS)
+
+# What ships must say VERSION: this machine's tarball, unpacked, in the
+# directory README names. At the tag, Go's own stamp says it too; off it (a
+# local run), only -X does, so a renamed variable would say devel.
+mine=$(tarname "${host#linux/}")
+mkdir "$work/check"
+tar -C "$work/check" -xzf "$work/$mine.tar.gz"
+got=$("$work/check/$mine/systemd-compose" --version)
+got=${got%%$'\n'*} # not `| head -1`: the binary writes systemd's line after head exits, and pipefail fails on the SIGPIPE
+case $got in # line 1 of printVersion (version.go)
+"systemd-compose $ver" | "systemd-compose $ver "*) ;; *) echo "ci/release: the binary says \"$got\", not $ver" >&2; exit 1 ;; esac
+
+cp "$work"/*.tar.gz "$out/" # this run's tarballs only; DIR was empty
+(cd "$out" && sha256sum -- *.tar.gz >SHA256SUMS)
 ls -l "$out"

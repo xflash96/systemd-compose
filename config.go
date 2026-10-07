@@ -26,6 +26,10 @@ const ConfigFileName = "systemd-compose.yaml"
 // belongs to, so the name has one owner here.
 const RenderDirName = ".systemd-compose"
 
+// Every environment override the tool reads is SYSTEMD_COMPOSE_*, and a
+// new one joins overrideVars in config_test.go: ci/live unsets them by
+// that prefix, and the tests set them to junk and clear them per test.
+
 // ProjectNameVar overrides the project name from the environment or from a
 // `.env` file beside the yaml. The project name is the namespace: every
 // unit, the target and the slice carry it, so two clones of one project, or
@@ -131,8 +135,12 @@ type Healthcheck struct {
 }
 
 type Build struct {
-	Run     []string
-	Creates string // relative to working_dir (absolute left alone); empty = only on demand
+	Run []string
+	// Creates is where up looks for what the build makes: absolute once
+	// loaded (the yaml's path is relative to the service's working_dir,
+	// where the build runs); "" when the build declares none, which up
+	// then skips unless --build.
+	Creates string
 }
 
 type Resources struct {
@@ -342,10 +350,12 @@ func parse(data []byte, abs string, override, from string, vars map[string]strin
 		return nil, err
 	}
 	top = withoutExtensions(top)
-	// The schema is unversioned on purpose while the only files are the
-	// author's own; a habitual compose `version:` gets a pointed message.
+	// No version key yet. The schema's promise (README): a key that has to
+	// change its meaning brings an optional version: with it, and a file
+	// without one keeps today's meaning. A habitual compose version: line
+	// gets a pointed message.
 	if vn := top.get("version"); vn != nil {
-		return nil, fmt.Errorf("line %d: version: there is no version key; the schema is unversioned until it has users beyond this repo (drop the line)", vn.Line)
+		return nil, fmt.Errorf("line %d: version: there is no version key; a file without one keeps meaning what it means today (drop the line)", vn.Line)
 	}
 	if err := unknownKeys(top, "top level", "name", "resources", "services"); err != nil {
 		return nil, err
@@ -442,8 +452,9 @@ func projectName(s, where string) error {
 	return nil
 }
 
-// literalPath is the one rule for a path the yaml means literally: systemd
-// would expand a % specifier in it.
+// literalPath is the one rule for a path the tool reads itself (working_dir,
+// env_file, build: creates): a % there would never mean what a specifier
+// means; for the first two, systemd would also expand it.
 func literalPath(s, key, ctx string, line int) error {
 	if strings.Contains(s, "%") {
 		return fmt.Errorf("line %d: %s: %s: no %% here: the tool reads this path itself (to check it, hash it or build in it), so it must be literal", line, ctx, key)
@@ -676,7 +687,10 @@ func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 	if svc.Schedule != nil && svc.Restart != nil && svc.Restart.Policy == "always" {
 		return nil, fmt.Errorf("line %d: %s: schedule: with restart: %s would restart a finished job forever; drop one", node.Line, ctx, svc.Restart.Written)
 	}
-	if svc.Build != nil {
+	if svc.Build != nil { // after every key: creates: needs the final working_dir
+		if c := svc.Build.Creates; c != "" && !filepath.IsAbs(c) {
+			svc.Build.Creates = filepath.Join(svc.WorkingDir, c)
+		}
 		for _, kv := range svc.Environment {
 			if usesSpecifier(kv.Value) {
 				return nil, fmt.Errorf("line %d: %s: build: runs in the service's environment through systemd-run, which does not expand specifiers, and environment: %s uses one", node.Line, ctx, kv.Key)
@@ -1148,6 +1162,9 @@ func parseBuild(n *yaml.Node, ctx string) (*Build, error) {
 	}
 	if cn := m.get("creates"); cn != nil {
 		if b.Creates, err = scalar(cn, ctx+": build: creates"); err != nil {
+			return nil, err
+		}
+		if err := literalPath(b.Creates, "build: creates", ctx, cn.Line); err != nil {
 			return nil, err
 		}
 	}

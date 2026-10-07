@@ -87,6 +87,30 @@ Project=demo
 Service=worker
 Config=@DIR@/systemd-compose.yaml
 
+### demo-cache.service
+[Unit]
+Description=demo: cache
+SourcePath=@DIR@/systemd-compose.yaml
+PartOf=demo.target
+After=demo-db.service
+Wants=demo-db.service
+After=demo-api.service
+Wants=demo-api.service
+PartOf=demo-api.service
+After=demo-worker.service
+Requires=demo-worker.service
+
+[Service]
+WorkingDirectory=@DIR@
+ExecStart=@BIN@/node cache.mjs
+Slice=demo.slice
+SyslogIdentifier=demo-cache
+
+[X-SystemdCompose]
+Project=demo
+Service=cache
+Config=@DIR@/systemd-compose.yaml
+
 ### demo-backup.service
 [Unit]
 Description=demo: backup
@@ -148,6 +172,7 @@ Wants=demo-db.service
 Wants=demo-api.socket
 Wants=demo-api.service
 Wants=demo-worker.service
+Wants=demo-cache.service
 Wants=demo-backup.timer
 
 [Install]

@@ -261,6 +261,7 @@ func (m *Manager) ServiceRun(unit string) (env, argv []string, err error) {
 }
 
 // UnitDir is where this instance's persistent unit links live.
+// ci/live spells the same rule for its link checks.
 func (m *Manager) UnitDir() (string, error) {
 	if !m.User {
 		return "/etc/systemd/system", nil
@@ -280,6 +281,13 @@ func (m *Manager) UnitDir() (string, error) {
 func (m *Manager) Link(paths []string) error {
 	return m.run(append([]string{"link", "--no-reload"}, paths...)...)
 }
+
+// LinkLoaded links and reloads, for a unit needed before up's own reload:
+// the manager does not see a file linked with --no-reload. Re-linking an
+// already-linked path reloads too (ci/live's "the build saw the new cap"
+// fails otherwise).
+func (m *Manager) LinkLoaded(path string) error { return m.run("link", path) }
+
 func (m *Manager) EnableNow(unit string) error { return m.run("enable", "--now", unit) }
 func (m *Manager) Start(units []string) error  { return m.run(append([]string{"start"}, units...)...) }
 func (m *Manager) TryRestart(units []string) error {
