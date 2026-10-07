@@ -90,26 +90,21 @@ func (s UnitState) Active() bool {
 	return s.ActiveState == "active" || s.ActiveState == "activating" || s.ActiveState == "reloading"
 }
 
-// StartedBefore reports whether the current run began before t, at the
-// one-second resolution systemctl prints. A tie reads as not before: up
-// writes a file and restarts the unit within the same second.
+// StartedBefore reports whether the current run began before t.
 func (s UnitState) StartedBefore(t time.Time) bool {
-	return !s.Started.IsZero() && s.Started.Unix() < t.Unix()
+	return !s.Started.IsZero() && s.Started.Before(t)
 }
 
-// showTime is systemctl's default timestamp format. The call runs with
-// TZ=UTC so the zone parses on any systemd; --timestamp=utc (or us+utc)
-// would need 248 and unix 251. Whole seconds lose nothing microseconds
-// would save: a unit that restarts itself between up's write and its reload
-// carries the old definition with a later start either way.
-const showTime = "Mon 2006-01-02 15:04:05 MST"
+// showTime is what --timestamp=us+utc prints (systemd 248 and later).
+// Microseconds, not the default whole seconds: an up that writes a file in
+// the same second an earlier up restarted the unit must still see the run
+// as older than the file (whole seconds would call it applied).
+const showTime = "Mon 2006-01-02 15:04:05.000000 MST"
 
 // States asks systemctl about every unit at once.
 func (m *Manager) States(units []string) (map[string]UnitState, error) {
-	args := append([]string{"show", "-p", "Id,LoadState,ActiveState,SubState,UnitFileState,InactiveExitTimestamp"}, units...)
-	c := m.cmd("systemctl", args...)
-	c.Env = append(os.Environ(), "TZ=UTC")
-	out, err := c.Output()
+	args := append([]string{"show", "--timestamp=us+utc", "-p", "Id,LoadState,ActiveState,SubState,UnitFileState,InactiveExitTimestamp"}, units...)
+	out, err := m.cmd("systemctl", args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("systemctl show: %v", asExit(err))
 	}

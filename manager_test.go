@@ -8,14 +8,14 @@ import (
 )
 
 // The start time is what tells a running unit from the file it was started
-// from; States runs systemctl with TZ=UTC so it parses on any systemd.
+// from, to the microsecond (--timestamp=us+utc).
 func TestParseStates(t *testing.T) {
 	out := `Id=a.service
 LoadState=loaded
 ActiveState=active
 SubState=running
 UnitFileState=linked
-InactiveExitTimestamp=Fri 2026-09-04 05:26:51 UTC
+InactiveExitTimestamp=Fri 2026-09-04 05:26:51.250000 UTC
 
 Id=b.service
 LoadState=not-found
@@ -29,17 +29,17 @@ InactiveExitTimestamp=
 		t.Fatal(err)
 	}
 	a, b := states["a.service"], states["b.service"]
-	if !a.Active() || a.UnitFileState != "linked" || a.Started.Unix() != 1788499611 {
+	if !a.Active() || a.UnitFileState != "linked" || a.Started.UnixMicro() != 1788499611250000 {
 		t.Errorf("a = %+v", a)
 	}
 	if b.Known() || !b.Started.IsZero() {
 		t.Errorf("b = %+v", b)
 	}
-	if !a.StartedBefore(a.Started.Add(time.Second)) {
-		t.Error("a file written a second after the start must read as newer")
+	if !a.StartedBefore(a.Started.Add(500 * time.Millisecond)) {
+		t.Error("a file written later in the same second must read as newer (whole seconds would call it applied)")
 	}
-	if a.StartedBefore(a.Started) || a.StartedBefore(a.Started.Add(900*time.Millisecond)) {
-		t.Error("a tie within the second must read as applied")
+	if a.StartedBefore(a.Started) || a.StartedBefore(a.Started.Add(-time.Millisecond)) {
+		t.Error("a file written before or at the start must read as applied")
 	}
 	if b.StartedBefore(time.Now()) {
 		t.Error("a unit that never started has no start to be before anything")

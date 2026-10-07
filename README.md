@@ -12,7 +12,7 @@ names the system instance, and running as root defaults to it. Nothing is
 reinvented: systemd owns the processes, the journal owns the logs, and every
 verb is a few `systemctl` calls you could type yourself.
 
-One static Go binary, no runtime dependency. Linux with systemd only.
+One static Go binary, no runtime dependency. Linux with systemd 248 or later.
 
 ```
 ./install            # -> ~/.local/bin/systemd-compose (needs a Go toolchain)
@@ -131,6 +131,11 @@ Names in `depends_on` are services in this file. Everything is rendered to
 5. Retires units registered from this directory that the yaml no longer
    declares. An active one is refused unless `--force`. When step 4 fails,
    `up` stops before this; the next `up` or `down` retires them.
+
+`up --force-recreate` restarts every running service whether it changed or
+not; `up --no-recreate` restarts none, and a changed one stays `changed (not
+applied)` for the next `up`. Neither touches an `on_change: start-only`
+service: `up` never restarts one.
 
 `down` is `disable --now` on every unit plus `reset-failed`, and it retires
 what an older version of the yaml registered from this directory, active or

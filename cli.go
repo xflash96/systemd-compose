@@ -30,8 +30,11 @@ target and the slice carry it. It comes from, in order: -p NAME, the
 SYSTEMD_COMPOSE_PROJECT_NAME variable in the environment, the same variable
 in a .env beside the yaml, name: in the yaml, the directory's name.
 
-  up [--build] [--force]   render, verify, register and start the project;
-                           restart what changed (on_change: start-only warns)
+  up [--build] [--force] [--force-recreate|--no-recreate]
+                           render, verify, register and start the project;
+                           restart what changed (on_change: start-only warns);
+                           --force-recreate restarts every running service,
+                           --no-recreate none; --force retires active orphans
   down                     stop and unregister every unit, and retire what an
                            older yaml left registered; the current files stay
   ps                       the project's units and their state
@@ -345,16 +348,23 @@ type planRow struct {
 }
 
 func (pr *project) up(args []string) error {
-	force, buildAll := false, false
+	force, buildAll, recreateAll, noRecreate := false, false, false, false
 	for _, a := range args {
 		switch a {
 		case "--force":
 			force = true
 		case "--build":
 			buildAll = true
+		case "--force-recreate":
+			recreateAll = true
+		case "--no-recreate":
+			noRecreate = true
 		default:
 			return fmt.Errorf("up acts on the whole project; %q is not a flag here (start SERVICE for one service)", a)
 		}
+	}
+	if recreateAll && noRecreate {
+		return fmt.Errorf("--force-recreate and --no-recreate contradict each other; pick one")
 	}
 	if err := pr.render(); err != nil {
 		return err
@@ -420,7 +430,7 @@ func (pr *project) up(args []string) error {
 
 	// The plan.
 	var rows []planRow
-	var toRestart, toWarn []string
+	var toRestart, warnings []string
 	for _, u := range pr.rendered {
 		path := filepath.Join(pr.renderDir, u.Name)
 		row := planRow{unit: u.Name, change: "unchanged"}
@@ -455,11 +465,23 @@ func (pr *project) up(args []string) error {
 			row.actions = append(row.actions, "runs on its timer")
 		case isRestartable && !st.Active():
 			row.actions = append(row.actions, "start")
-		case isRestartable && changed && svc != nil && svc.OnChange == "start-only":
+		case isRestartable && (changed || recreateAll) && svc.OnChange == "start-only":
+			// --force-recreate does not outrank it: up never restarts a
+			// start-only service, which is what the setting promises.
 			row.actions = append(row.actions, "running, NOT restarted (on_change: start-only); when convenient: systemd-compose restart "+svc.Name)
-			toWarn = append(toWarn, u.Name)
+			if changed {
+				warnings = append(warnings, u.Name+" changed on disk but was left running (on_change: start-only)")
+			} else {
+				warnings = append(warnings, u.Name+" was not recreated (on_change: start-only outranks --force-recreate)")
+			}
+		case isRestartable && changed && noRecreate:
+			row.actions = append(row.actions, "running, NOT restarted (--no-recreate)")
+			warnings = append(warnings, u.Name+" changed on disk but was left running (--no-recreate)")
 		case isRestartable && changed:
 			row.actions = append(row.actions, "try-restart")
+			toRestart = append(toRestart, u.Name)
+		case isRestartable && recreateAll:
+			row.actions = append(row.actions, "try-restart (--force-recreate)")
 			toRestart = append(toRestart, u.Name)
 		}
 		rows = append(rows, row)
@@ -560,8 +582,8 @@ func (pr *project) up(args []string) error {
 		}
 	}
 	sweepEmptyWants(unitDir)
-	for _, w := range toWarn {
-		fmt.Printf("WARNING: %s changed on disk but was left running (on_change: start-only)\n", w)
+	for _, w := range warnings {
+		fmt.Println("WARNING: " + w)
 	}
 	fmt.Println()
 	return pr.table()
