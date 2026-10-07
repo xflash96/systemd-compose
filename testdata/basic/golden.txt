@@ -1,0 +1,141 @@
+### demo.slice
+[Unit]
+Description=demo (systemd-compose project)
+SourcePath=@DIR@/systemd-compose.yaml
+
+[Slice]
+MemoryMax=2G
+
+[X-SystemdCompose]
+Project=demo
+Config=@DIR@/systemd-compose.yaml
+
+### demo-db.service
+[Unit]
+Description=demo: db
+SourcePath=@DIR@/systemd-compose.yaml
+PartOf=demo.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=@DIR@
+ExecStart=@BIN@/psql -c "select 1"
+Slice=demo.slice
+SyslogIdentifier=demo-db
+
+[X-SystemdCompose]
+Project=demo
+Service=db
+Config=@DIR@/systemd-compose.yaml
+
+### demo-api.service
+[Unit]
+Description=the api, described by hand
+SourcePath=@DIR@/systemd-compose.yaml
+PartOf=demo.target
+After=demo-db.service
+Requires=demo-db.service
+After=network-online.target
+
+[Service]
+WorkingDirectory=@DIR@/app
+Environment=PORT=8080
+Environment="GREETING=hello world"
+Environment="QUOTED=say \"hi\""
+Environment=PCT=100%%
+EnvironmentFile=@DIR@/.env
+EnvironmentFile=-@DIR@/.env.local
+ExecStart=@BIN@/node server.mjs --port 8080
+ExecStartPost=/opt/systemd-compose probe --interval 1s --timeout 2s --start-period 30s -- @BIN@/curl -sf http://127.0.0.1:8080/health
+TimeoutStartSec=37s
+Restart=on-failure
+RestartSec=3s
+Slice=demo.slice
+SyslogIdentifier=demo-api
+MemoryMax=512M
+CPUQuota=50%
+TasksMax=64
+TimeoutStopSec=10
+Environment=EXTRA=1
+
+[X-SystemdCompose]
+Project=demo
+Service=api
+Config=@DIR@/systemd-compose.yaml
+RestartTriggers=bb696238bb0e8c11
+
+### demo-worker.service
+[Unit]
+Description=demo: worker
+SourcePath=@DIR@/systemd-compose.yaml
+PartOf=demo.target
+After=demo-api.service
+Requires=demo-api.service
+
+[Service]
+WorkingDirectory=@DIR@
+Environment=MODE=batch
+ExecStart=@BIN@/node worker.mjs
+Restart=always
+Slice=demo.slice
+SyslogIdentifier=demo-worker
+
+[X-SystemdCompose]
+Project=demo
+Service=worker
+Config=@DIR@/systemd-compose.yaml
+
+### demo-backup.service
+[Unit]
+Description=demo: backup
+SourcePath=@DIR@/systemd-compose.yaml
+PartOf=demo.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DIR@
+ExecStart=@BIN@/backup --all
+Slice=demo.slice
+SyslogIdentifier=demo-backup
+SuccessExitStatus=2
+
+[X-SystemdCompose]
+Project=demo
+Service=backup
+Config=@DIR@/systemd-compose.yaml
+
+### demo-backup.timer
+[Unit]
+Description=demo: backup (timer)
+SourcePath=@DIR@/systemd-compose.yaml
+PartOf=demo.target
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+AccuracySec=10s
+Persistent=yes
+RandomizedDelaySec=5min
+OnBootSec=1min
+
+[X-SystemdCompose]
+Project=demo
+Service=backup
+Config=@DIR@/systemd-compose.yaml
+
+### demo.target
+[Unit]
+Description=demo (systemd-compose project)
+SourcePath=@DIR@/systemd-compose.yaml
+Wants=demo-db.service
+Wants=demo-api.service
+Wants=demo-worker.service
+Wants=demo-backup.timer
+
+[Install]
+WantedBy=default.target
+
+[X-SystemdCompose]
+Project=demo
+Config=@DIR@/systemd-compose.yaml
+

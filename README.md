@@ -1,0 +1,187 @@
+# systemd-compose
+
+docker-compose verbs over systemd, with a project-local `systemd-compose.yaml`.
+
+Inside a project directory, or any directory below one, `up` renders unit
+files from the yaml, registers them with the user manager, and starts them;
+`down` unregisters them; `ps`, `logs`, `start`, `stop`, `restart`, `build`,
+`config` and `top` are scoped to that project. Outside a project, the same
+verbs are a thin spelling of `systemctl` on the user instance, so leaving a
+project directory never changes which instance answers; `--system` (or `-s`)
+names the system instance, and running as root defaults to it. Nothing is
+reinvented: systemd owns the processes, the journal owns the logs, and every
+verb is a few `systemctl` calls you could type yourself.
+
+One static Go binary, no runtime dependency. Linux with systemd only.
+
+```
+./install            # -> ~/.local/bin/systemd-compose (needs a Go toolchain)
+alias sc=systemd-compose
+```
+
+## A project
+
+```yaml
+# systemd-compose.yaml
+name: demo                    # optional; default: the directory name, sanitized
+resources: {memory: 2G}       # optional; a cap on the whole project
+
+services:
+  db:
+    command: postgres -D data
+    restart: always
+  api:
+    command: node server.mjs --port 8080
+    working_dir: app                    # relative to this file
+    environment: {PORT: "8080"}
+    env_file: [.env, {path: .env.local, required: false}]
+    restart: {policy: on-failure, delay: 3s}
+    depends_on:
+      db: {condition: service_started, required: true, restart: true}
+    healthcheck:
+      test: [curl, -sf, http://127.0.0.1:8080/health]
+      interval: 2s
+      timeout: 5s
+      start_period: 60s
+    build:
+      run: [npm ci, npm run build]
+      creates: dist
+    resources: {memory: 512M, cpus: 0.5, pids: 64}
+    unit:                               # raw systemd, merged last
+      Service: {TimeoutStopSec: "10"}
+  worker:
+    command: node worker.mjs
+    depends_on: {api: {condition: service_healthy}}
+    on_change: start-only               # never restarted by `up`
+  backup:
+    command: backup --all
+    schedule: "*-*-* 03:00:00"          # a timer + oneshot pair
+```
+
+```
+sc up          # render, verify, register, start; restart what changed
+sc ps          # the project's units
+sc logs -f api # journalctl, scoped
+sc down        # stop and unregister; the rendered files stay
+```
+
+## The project name is the namespace
+
+Every unit, the target and the slice carry the project name as a prefix,
+and `up` refuses a name another registration already owns. So two copies of
+one project on one machine, a popular project you cloned or two variants of
+your own, coexist by taking different names, without an edit to the yaml.
+The name comes from, in order:
+
+1. `-p NAME` (or `--project-name NAME`) before the verb
+2. `SYSTEMD_COMPOSE_PROJECT_NAME` in the environment
+3. the same variable in a `.env` file beside the yaml (the personal, uncommitted way)
+4. `name:` in the yaml (the author's default)
+5. the directory's name, sanitized
+
+The scope line every verb prints says which one won: `project variant (user
+instance, name from .env)`. Both variants render into the same
+`.systemd-compose/` directory side by side, and each `down` and each orphan
+sweep touch only the units carrying their own name. That cuts both ways:
+renaming a project leaves the old name's units registered and running, so
+take them down under the old name first, `systemd-compose -p OLDNAME down`.
+
+## What the keys mean
+
+Names in `depends_on` are services in this file. Everything is rendered to
+`<project>-<service>.service` under a `<project>.target` and a
+`<project>.slice`; the target is what boots, the slice is what `logs` and
+`top` scope to.
+
+| key | renders to |
+|---|---|
+| `command` | `ExecStart=`, systemd's own parsing; the first word is resolved to an absolute path at render time, against `~/.local/bin` and your `PATH`, and refused if not found; nothing else from your shell reaches the service. For a shell, a specifier or a path with a space, omit it and write `unit: Service: ExecStart:` yourself |
+| `working_dir` | `WorkingDirectory=`, default the project directory |
+| `environment` | `Environment=` lines, literal: a `%` is escaped so systemd does not expand it; a bare `KEY` is refused, nothing is captured from your shell |
+| `env_file` | `EnvironmentFile=`; a change to the file is a change to the unit |
+| `restart` | `Restart=`, `RestartSec=` |
+| `depends_on` | `After=` + `Wants=`; `required: true` → `Requires=`; `restart: true` → `PartOf=`. `condition: service_healthy` and `service_completed_successfully` always render `Requires=`, since a `Wants=` dependent would start even when the dependency fails |
+| `healthcheck` | an `ExecStartPost=` probe; the unit is not "started" until it passes, so dependents wait |
+| `oneshot` | `Type=oneshot`, `RemainAfterExit=yes`; a job dependents can wait for |
+| `schedule` | a `.timer` (`OnCalendar=`, `Persistent=yes`, `AccuracySec=10s`) driving a oneshot service. Runs never overlap: the ticks that fall during a run collapse into one run that starts when it ends |
+| `build` | not rendered: steps run at `up` (when `creates:`, relative to `working_dir`, is missing) or `build`, in the service's own environment |
+| `resources` | `MemoryMax=`, `CPUQuota=`, `TasksMax=`; at project level, on the slice, where a change applies in place and restarts nothing |
+| `on_change` | `restart` (default) or `start-only`: `up` never restarts it |
+| `unit` | raw sections merged last; a directive a key above already writes is an error, even one systemd would accept twice, and so is a second `Environment=` for a variable `environment:` sets |
+
+## What `up` does
+
+1. Renders every unit in memory and runs `systemd-analyze verify` on them in
+   a staging directory. Any output refuses: a misspelled directive is a
+   warning systemd would otherwise ignore.
+2. Prints the plan: per unit `new`, `unchanged`, `changed`, or one of the two
+   kinds of changed explained in step 4, and what will happen.
+3. Runs `build` steps whose `creates:` path is missing.
+4. Writes the files into `.systemd-compose/` (which ignores itself in git),
+   links them with `systemctl --user link`, enables the target, starts
+   everything, and `try-restart`s the changed units; a unit that fails to
+   start does not keep the others on their old definition. A running unit
+   whose rendered file is gone (after a `git clean`, say) is `changed (no
+   baseline)`, since there is nothing to compare against. One that has been
+   running since before its file was last written is `changed (not
+   applied)`: an earlier `up` that failed or was interrupted before the
+   restart, or an `on_change: start-only` service not restarted yet. (So
+   touching a file in `.systemd-compose/` restarts its unit at the next
+   `up`.)
+5. Retires units registered from this directory that the yaml no longer
+   declares. An active one is refused unless `--force`. When step 4 fails,
+   `up` stops before this; the next `up` or `down` retires them.
+
+`down` is `disable --now` on every unit plus `reset-failed`, and it retires
+what an older version of the yaml registered from this directory, active or
+not (no `--force`: `down` is the verb that stops things), so nothing of the
+project stays registered. The current units' rendered files stay, as
+compose keeps the compose file; a retired orphan's file goes.
+
+## Overrides outside the yaml
+
+systemd's drop-in directories work on the rendered units. A `.conf` file in
+`~/.config/systemd/user/<project>-.service.d/` applies to every service unit
+named `<project>-…`, which is every service of the project (a project name
+has no dash, so no other project matches); `<project>-<service>.service.d/`
+applies to one, and timers take `<project>-.timer.d/`. `up`'s verify gate
+reads them, so a typo there refuses `up` like a typo in the yaml. They are
+not part of the render, though, so `up` never restarts anything for them:
+
+```
+mkdir -p ~/.config/systemd/user/demo-.service.d
+printf '[Service]\nNice=5\n' > ~/.config/systemd/user/demo-.service.d/nice.conf
+sc up              # verify reads it (a typo refuses), and reloads
+sc restart api db  # name them: a bare restart would also restart start-only services
+```
+
+## Where it differs from compose, on purpose
+
+- No `ports:` and no `networks:`: a host process binds what it binds.
+- No `${VAR}` interpolation and no shell in `command:`: what you write is what
+  systemd runs. `$`, `%` and a bare `;` are refused; the raw form is available
+  through `unit: Service: ExecStart:`.
+- `healthcheck` is readiness only. Liveness with a restart is a `schedule:`
+  service of your own, because it needs judgment a generic probe lacks.
+- `depends_on` defaults to `Wants=`. `required: true`, and the health and
+  completion conditions, give `Requires=`, which also stops the dependent
+  when you stop the dependency.
+- A project name may not contain a dash: it is systemd's slice separator. A
+  name derived from a directory such as `my-app` becomes `my_app`.
+- Every string is one line. A newline anywhere in a value is refused, because
+  it would render as further directives. A key given twice is refused too.
+- `on_change: start-only` cannot be combined with `depends_on: {x: {restart:
+  true}}` on the same service: the `PartOf=` edge would restart it anyway.
+- No `version:` key. The schema is unversioned while its only files are the
+  author's own; a compose-habit `version:` line gets a pointed refusal.
+- No profiles yet. They are additive when a project needs them.
+
+## Outside a project
+
+```
+sc ps -a                # every service and timer on your user instance
+sc logs -f foo          # journalctl --user -u foo -f
+sc up foo.timer         # enable --now
+sc restart foo          # any other verb passes through to systemctl --user
+sc -s ps                # the system instance, explicitly
+```
