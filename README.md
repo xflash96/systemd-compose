@@ -132,7 +132,7 @@ tool reads those paths itself.
 | `env_file` | `EnvironmentFile=`; a change to the file is a change to the unit |
 | `restart` | `Restart=`, `RestartSec=` |
 | `depends_on` | `After=` + `Wants=`; `required: true` → `Requires=`; `restart: true` → `PartOf=`. `condition: service_healthy` and `service_completed_successfully` always render `Requires=`, since a `Wants=` dependent would start even when the dependency fails |
-| `healthcheck` | an `ExecStartPost=` probe; the unit is not "started" until it passes, so dependents wait |
+| `healthcheck` | an `ExecStartPost=` probe; the unit is not "started" until it passes, so dependents wait. `ps` shows the verdict in a HEALTH column: `starting`, `ready`, `probe failed` |
 | `oneshot` | `Type=oneshot`, `RemainAfterExit=yes`; a job dependents can wait for |
 | `schedule` | a `.timer` (`OnCalendar=`, `Persistent=yes`, `AccuracySec=10s`) driving a oneshot service. Runs never overlap: the ticks that fall during a run collapse into one run that starts when it ends |
 | `build` | not rendered: steps run at `up` (when `creates:`, relative to `working_dir`, is missing) or `build`, in the service's own environment |
@@ -206,7 +206,10 @@ sc restart api db  # name them: a bare restart would also restart start-only ser
 - No shell in `command:`: what you write is what systemd runs. A bare `;` is
   refused; the raw form is available through `unit: Service: ExecStart:`.
 - `healthcheck` is readiness only. Liveness with a restart is a `schedule:`
-  service of your own, because it needs judgment a generic probe lacks.
+  service of your own, because it needs judgment a generic probe lacks. So
+  `ready` in `ps` means the probe passed when the service started; nothing
+  probes it afterwards (compose's `ps` shows the last of its periodic
+  checks).
 - `depends_on` defaults to `Wants=`. `required: true`, and the health and
   completion conditions, give `Requires=`, which also stops the dependent
   when you stop the dependency.

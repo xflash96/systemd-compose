@@ -67,3 +67,30 @@ func TestWriteUnitKeepsMtime(t *testing.T) {
 		t.Errorf("changed text not written: mtime %v, err %v", mtime(p), err)
 	}
 }
+
+// The probe's verdict survives in ExecStartPost= after the unit fails.
+func TestProbeExits(t *testing.T) {
+	out := `Id=a.service
+ExecStartPost={ path=/x ; argv[]=/x probe -- curl ; ignore_errors=no ; start_time=[Fri] ; stop_time=[Fri] ; pid=9 ; code=exited ; status=1 }
+
+Id=b.service
+ExecStartPost={ path=/x ; argv[]=/x probe -- curl ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+
+Id=c.service
+ExecStartPost={ path=/x ; argv[]=/x ; ignore_errors=no ; start_time=[Fri] ; stop_time=[Fri] ; pid=9 ; code=killed ; status=9/KILL }
+`
+	got := parseProbeExits(out)
+	if got["a.service"] != 1 || got["b.service"] != -1 || got["c.service"] != 1 {
+		t.Errorf("parseProbeExits = %v", got)
+	}
+	cases := []struct {
+		active string
+		exit   int
+		want   string
+	}{{"activating", -1, "starting"}, {"active", 0, "ready"}, {"failed", 1, "probe failed"}, {"failed", -1, "-"}, {"inactive", 0, "-"}}
+	for _, c := range cases {
+		if h := healthOf(UnitState{ActiveState: c.active}, c.exit); h != c.want {
+			t.Errorf("healthOf(%s, %d) = %q, want %q", c.active, c.exit, h, c.want)
+		}
+	}
+}

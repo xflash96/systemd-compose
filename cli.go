@@ -287,17 +287,41 @@ func (pr *project) table() error {
 	if err != nil {
 		return err
 	}
+	// HEALTH only when something has a healthcheck: the probe's verdict at
+	// start, read from systemd; nothing probes a running service.
+	health := map[string]string{}
+	var probed []string
+	for _, s := range pr.p.Services {
+		if s.Healthcheck != nil {
+			probed = append(probed, pr.p.ServiceUnit(s))
+		}
+	}
+	if len(probed) > 0 {
+		exits, err := pr.m.ProbeExits(probed)
+		if err != nil {
+			return err
+		}
+		for _, u := range probed {
+			health[u] = healthOf(states[u], exits[u])
+		}
+	}
 	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
-	fmt.Fprintln(w, "UNIT\tLOAD\tACTIVE\tSUB\tREGISTERED")
+	row := func(h string, cells ...string) { // h goes before REGISTERED
+		if len(probed) > 0 {
+			cells = append(cells[:4:4], h, cells[4])
+		}
+		fmt.Fprintln(w, strings.Join(cells, "\t"))
+	}
+	row("HEALTH", "UNIT", "LOAD", "ACTIVE", "SUB", "REGISTERED")
 	for _, n := range names {
 		s := states[n]
 		r := pr.registrationOf(unitDir, n)
 		if r.kind == "project" || r.kind == "foreign" {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\tNOT OURS: %s\n", n, s.LoadState, s.ActiveState, s.SubState, r.owner)
+			row(health[n], n, s.LoadState, s.ActiveState, s.SubState, "NOT OURS: "+r.owner)
 			continue
 		}
 		if !s.Known() {
-			fmt.Fprintf(w, "%s\tnot-found\t-\t-\t%s\n", n, pr.notRegistered(n))
+			row(health[n], n, "not-found", "-", "-", pr.notRegistered(n))
 			continue
 		}
 		inactive := ""
@@ -311,9 +335,24 @@ func (pr *project) table() error {
 		case reg == "":
 			reg = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s%s\n", n, s.LoadState, s.ActiveState, s.SubState, reg, inactive)
+		row(health[n], n, s.LoadState, s.ActiveState, s.SubState, reg+inactive)
 	}
 	return w.Flush()
+}
+
+// healthOf words a healthchecked service's state: starting while it
+// activates (the probe runs as ExecStartPost=), ready once it passed,
+// probe failed when the probe is why it failed.
+func healthOf(st UnitState, probeExit int) string {
+	switch {
+	case st.ActiveState == "activating":
+		return "starting"
+	case st.ActiveState == "active" || st.ActiveState == "reloading":
+		return "ready"
+	case st.ActiveState == "failed" && probeExit > 0:
+		return "probe failed"
+	}
+	return "-"
 }
 
 // journalctl flags that take a separate value; a bare word after one of

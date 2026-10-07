@@ -146,6 +146,59 @@ func parseStates(out string) (map[string]UnitState, error) {
 	return states, nil
 }
 
+// ProbeExits reads each unit's last ExecStartPost= exit status, which for a
+// service with a healthcheck is the probe's verdict at start: 0 passed, more
+// failed, -1 when none ran. systemd keeps it after the unit fails.
+func (m *Manager) ProbeExits(units []string) (map[string]int, error) {
+	out, err := m.cmd("systemctl", append([]string{"show", "-p", "Id,ExecStartPost"}, units...)...).Output()
+	if err != nil {
+		return nil, fmt.Errorf("systemctl show: %v", asExit(err))
+	}
+	return parseProbeExits(string(out)), nil
+}
+
+func parseProbeExits(out string) map[string]int {
+	exits := map[string]int{}
+	for _, block := range strings.Split(strings.TrimSpace(out), "\n\n") {
+		id, exit := "", -1
+		for _, line := range strings.Split(block, "\n") {
+			k, v, _ := strings.Cut(line, "=")
+			switch k {
+			case "Id":
+				id = v
+			case "ExecStartPost":
+				// "{ path=… ; … ; code=exited ; status=1 }"; a killed probe
+				// reads code=killed, one that never ran code=(null).
+				code := fieldOf(v, "code=")
+				status, _ := strconv.Atoi(strings.SplitN(fieldOf(v, "status="), "/", 2)[0])
+				switch {
+				case code == "exited" && status > exit:
+					exit = status
+				case code == "killed" || code == "dumped":
+					exit = max(exit, 1)
+				}
+			}
+		}
+		if id != "" {
+			exits[id] = exit
+		}
+	}
+	return exits
+}
+
+// fieldOf returns the value after key in systemctl's "a=1 ; b=2" lists.
+func fieldOf(s, key string) string {
+	i := strings.Index(s, key)
+	if i < 0 {
+		return ""
+	}
+	v := s[i+len(key):]
+	if j := strings.IndexAny(v, " ;}"); j >= 0 {
+		v = v[:j]
+	}
+	return v
+}
+
 // UnitDir is where this instance's persistent unit links live.
 func (m *Manager) UnitDir() (string, error) {
 	if !m.User {
