@@ -39,7 +39,9 @@ func TestLoadRefusals(t *testing.T) {
 		{"bare semicolon", "services: {a: {command: node a ; node b}}", "bare ;"},
 		{"bare env key", "services: {a: {command: x, environment: [PATH]}}", "reserved"},
 		{"bad env key", "services: {a: {command: x, environment: {1ABC: v}}}", "not a valid variable name"},
-		{"bad restart", "services: {a: {command: x, restart: sometimes}}", "use no, on-failure or always"},
+		{"bad restart", "services: {a: {command: x, restart: sometimes}}", "use no, on-failure, always or unless-stopped"},
+		{"restart with a retry count", "services: {a: {command: x, restart: \"on-failure:5\"}}", "no faithful systemd form"},
+		{"unless-stopped is always for a job", "services: {a: {command: x, schedule: hourly, restart: unless-stopped}}", "finished job"},
 		{"schedule with always", "services: {a: {command: x, schedule: hourly, restart: always}}", "finished job"},
 		{"schedule with healthcheck", "services: {a: {command: x, schedule: hourly, healthcheck: {test: [x]}}}", "nothing to gate"},
 		{"depends on unknown", "services: {a: {command: x, depends_on: [b]}}", "is not a service in this file"},
@@ -280,5 +282,122 @@ services:
 	target := units[len(units)-1].Text
 	if !strings.Contains(target, "Wants=pf-job.timer") || strings.Contains(target, "pf-debug") {
 		t.Errorf("the target is the enabled set:\n%s", target)
+	}
+}
+
+// compose's restart: unless-stopped is systemd's always.
+func TestRestartUnlessStopped(t *testing.T) {
+	p, err := loadYAML(t, "services: {a: {command: x, restart: unless-stopped}}")
+	if err != nil || p.Services[0].Restart.Policy != "always" {
+		t.Fatalf("%v %+v", err, p)
+	}
+}
+
+// compose's reuse: x- blocks are ignored, merge keys apply (explicit keys
+// win, the earlier of two sources wins), interpolation reaches a merged
+// value, and a merged unit: stays raw systemd.
+func TestExtensionsAndMerges(t *testing.T) {
+	t.Setenv(ProjectNameVar, "")
+	t.Setenv(ProfilesVar, "")
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT=8080\n"), 0o644)
+	path := filepath.Join(dir, ConfigFileName)
+	os.WriteFile(path, []byte(`x-common: &common
+  restart: always
+  environment: {PORT: "${PORT}"}
+  unit:
+    Service:
+      ExecStartPre: /bin/sh -c "echo $HOME"
+x-quiet: &quiet
+  restart: "no"
+  on_change: start-only
+services:
+  a:
+    <<: *common
+    command: node a
+    x-note: anything
+  b:
+    <<: [*quiet, *common]
+    command: node b
+  c:
+    <<: *common
+    restart: on-failure
+    command: node c
+`), 0o644)
+	p, err := Load(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b, c := p.Service("a"), p.Service("b"), p.Service("c")
+	if a.Restart.Policy != "always" || len(a.Environment) != 1 || a.Environment[0].Value != "8080" {
+		t.Errorf("a: %+v %+v", a.Restart, a.Environment)
+	}
+	if b.Restart.Policy != "no" || b.OnChange != "start-only" || len(b.Environment) != 1 {
+		t.Errorf("b: the earlier source must win: %+v %s %+v", b.Restart, b.OnChange, b.Environment)
+	}
+	if c.Restart.Policy != "on-failure" {
+		t.Errorf("c: the explicit key must win: %+v", c.Restart)
+	}
+	units, err := Render(p, RenderOptions{Exe: "/x", SearchPath: []string{fakeBin(t, "node")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(units[1].Text, `ExecStartPre=/bin/sh -c "echo $HOME"`) {
+		t.Errorf("a merged unit: must stay raw:\n%s", units[1].Text)
+	}
+	for y, want := range map[string]string{
+		"services: {a: {command: x, <<: 5}}":                            "<< merges a map",
+		"services: {a: {command: x, <<: [1, 2]}}":                       "<< merges a map",
+		"x-a: 1\nformat: 3\nservices: {a: {command: x}}":                `unknown key "format"`,
+		"services: {a: {command: x, healthcheck: {test: [x], x-b: 1}}}": `unknown key "x-b"`,
+		// What a merged block refuses is reported as itself, not as "<<".
+		"x-d: &d\n  restart: always\n  restart: \"no\"\nservices: {a: {<<: *d, command: x}}": `key "restart" already given`,
+	} {
+		if _, err := loadYAML(t, y); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: want %q, got %v", y, want, err)
+		}
+	}
+}
+
+// A merge key at the top level belongs to no key at all: the interpolation
+// walk must not index an empty path for it.
+func TestTopLevelMerge(t *testing.T) {
+	p, err := loadYAML(t, "x-top: &top\n  resources: {memory: 100M}\n<<: *top\nservices: {a: {command: x}}")
+	if err != nil || p.Resources == nil || p.Resources.Memory != "100M" {
+		t.Fatalf("a top-level << must merge: %v %+v", err, p)
+	}
+}
+
+// An x- block is expanded where a service uses it: unit content aliased from
+// one stays raw, an unused one is never read, and a service merely named
+// x-something is a service like any other.
+func TestExtensionExpandedWhereUsed(t *testing.T) {
+	t.Setenv(ProjectNameVar, "")
+	t.Setenv(ProfilesVar, "")
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT=8080\n"), 0o644)
+	path := filepath.Join(dir, ConfigFileName)
+	os.WriteFile(path, []byte(`x-raw: &raw
+  Service:
+    ExecStartPre: /bin/sh -c "echo $HOME"
+x-unused:
+  environment: {A: "${NEVER_SET}"}
+services:
+  a:
+    command: node a
+    unit: *raw
+  x-api:
+    command: node api
+    environment: {PORT: "${PORT}"}
+`), 0o644)
+	p, err := Load(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Service("a").Unit.has("Service", "ExecStartPre", `/bin/sh -c "echo $HOME"`) {
+		t.Errorf("aliased unit content must stay raw: %+v", p.Service("a").Unit)
+	}
+	if api := p.Service("x-api"); api == nil || api.Environment[0].Value != "8080" {
+		t.Errorf("a service named x-api is interpolated like any other: %+v", api)
 	}
 }

@@ -248,7 +248,13 @@ func interpolateTree(doc *yaml.Node, vars map[string]string) error {
 				if key := n.Content[i].Value; key != "<<" {
 					p = append(append([]string(nil), path...), key)
 				}
-				if len(p) == 3 && p[0] == "services" && p[2] == "unit" { // raw systemd
+				// An x- block (top level or in a service) means nothing where
+				// it is written; a service brings it in through a merge key
+				// or an alias, and the walk reaches it there, under that
+				// service's path. So it is expanded where it is used, and a
+				// unit: inside it, or aliased from it, is raw systemd like a
+				// service's own. (len(p) is 0 for a top-level `<<`.)
+				if extensionKey(p) || len(p) == 3 && p[0] == "services" && p[2] == "unit" {
 					continue
 				}
 				if err := walk(n.Content[i+1], p); err != nil {
@@ -271,4 +277,17 @@ func interpolateTree(doc *yaml.Node, vars map[string]string) error {
 		return nil
 	}
 	return walk(doc, nil)
+}
+
+// extensionKey reports a compose x- key where one is allowed: at the top
+// level or directly in a service. Elsewhere x- is an ordinary name (a
+// service may be called x-api).
+func extensionKey(p []string) bool {
+	switch {
+	case len(p) == 1:
+		return strings.HasPrefix(p[0], "x-")
+	case len(p) == 3 && p[0] == "services":
+		return strings.HasPrefix(p[2], "x-")
+	}
+	return false
 }

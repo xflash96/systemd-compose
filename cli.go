@@ -14,6 +14,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -21,10 +23,11 @@ import (
 
 const help = `systemd-compose — docker-compose verbs over systemd.
 
-  systemd-compose [--system|-s] [-p NAME] [--profile NAME]... VERB [ARGS...]
+  systemd-compose [--system|-s] [-f FILE] [-p NAME] [--profile NAME]... VERB [ARGS...]
 
 INSIDE A PROJECT (a systemd-compose.yaml here or in any parent directory, as
-compose finds its file) every verb is scoped to it, on the user instance;
+compose finds its file, or the one -f names) every verb is scoped to it, on
+the user instance;
 --system is refused. The project NAME is the namespace: every unit, the
 target and the slice carry it. It comes from, in order: -p NAME, the
 SYSTEMD_COMPOSE_PROJECT_NAME variable in the environment, the same variable
@@ -33,20 +36,28 @@ A service with profiles: runs only when one of them is active: --profile
 NAME (repeatable), else SYSTEMD_COMPOSE_PROFILES (comma list) from the
 environment or the .env; * is all. down and stop take every profile.
 
-  up [--build] [--force] [--force-recreate|--no-recreate]
+  up [--dry-run] [--build] [--force] [--force-recreate|--no-recreate]
                            render, verify, register and start the project;
                            restart what changed (on_change: start-only warns);
                            --force-recreate restarts every running service,
-                           --no-recreate none; --force retires active orphans
+                           --no-recreate none; --force retires active orphans;
+                           --dry-run prints the plan and stops
   down                     stop and unregister every unit, and retire what an
                            older yaml left registered; the current files stay
   ps                       the project's units and their state
   logs [-f] [SERVICE...]   the project's journal; no SERVICE = all of it
   start|stop|restart [SERVICE...]   run state only; no SERVICE = all
   build [SERVICE...]       run build: steps in the service's own environment
+  run [-e K=V] [-w DIR] [-T] SERVICE [CMD...]
+                           a one-off command in the service's environment
+                           (no CMD: the service's own); exec needs a CMD
   config                   the yaml, then every unit as it would be rendered
   top                      systemd-cgtop on the project slice
   VERB [SERVICE...]        systemctl --user VERB, service names mapped to units
+
+ANYWHERE:
+
+  ls                       every project registered on the user instance
 
 OUTSIDE A PROJECT: the same words on the user instance (the system instance
 when run as root); --system or -s for the system instance explicitly.
@@ -61,10 +72,29 @@ when run as root); --system or -s for the system instance explicitly.
   VERB ARGS...             systemctl VERB ARGS
 `
 
+// setFile takes -f: one file, which must be there. compose merges several
+// -f files; this tool reads one, so a second is refused rather than half
+// honoured.
+func (f *flags) setFile(path string) error {
+	if f.file != "" {
+		return fmt.Errorf("-f given twice: compose merges several files, this tool reads one")
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("-f %s: %v", path, err)
+	}
+	if st.IsDir() {
+		return fmt.Errorf("-f %s: a directory; name the yaml (or cd there)", path)
+	}
+	f.file = path
+	return nil
+}
+
 type flags struct {
 	user, system bool
 	name         string   // -p
 	profiles     []string // --profile, repeatable
+	file         string   // -f: the yaml, instead of discovery
 }
 
 func run(args []string) error {
@@ -87,6 +117,14 @@ func run(args []string) error {
 			}
 			f.profiles = append(f.profiles, args[1])
 			args = args[1:]
+		case "-f", "--file":
+			if len(args) < 2 {
+				return fmt.Errorf("%s needs a path to a systemd-compose.yaml", args[0])
+			}
+			if err := f.setFile(args[1]); err != nil {
+				return err
+			}
+			args = args[1:]
 		default:
 			if v, ok := strings.CutPrefix(args[0], "--project-name="); ok {
 				f.name = v
@@ -95,6 +133,13 @@ func run(args []string) error {
 			}
 			if v, ok := strings.CutPrefix(args[0], "--profile="); ok {
 				f.profiles = append(f.profiles, v)
+				args = args[1:]
+				continue
+			}
+			if v, ok := strings.CutPrefix(args[0], "--file="); ok {
+				if err := f.setFile(v); err != nil {
+					return err
+				}
 				args = args[1:]
 				continue
 			}
@@ -113,8 +158,20 @@ parsed:
 		return nil
 	case "probe":
 		return probe(args)
+	case "ls":
+		if f.system {
+			return fmt.Errorf("ls lists projects, and projects live on the user instance")
+		}
+		if f.file != "" || f.name != "" || len(f.profiles) > 0 {
+			return fmt.Errorf("ls lists every project registered here; -f, -p and --profile name one project and mean nothing to it")
+		}
+		return listProjects(&Manager{User: true})
 	}
-	if cfg := FindConfig("."); cfg != "" {
+	cfg := f.file
+	if cfg == "" {
+		cfg = FindConfig(".")
+	}
+	if cfg != "" {
 		if f.system {
 			return fmt.Errorf("--system is refused inside a project (%s): projects live on the user instance, which cannot link files under /home into /etc", cfg)
 		}
@@ -143,7 +200,7 @@ func projectMode(cfg, verb string, args []string, f flags) error {
 	if err != nil {
 		return err
 	}
-	pr := &project{p: p, m: &Manager{User: true}, renderDir: filepath.Join(p.Dir, ".systemd-compose")}
+	pr := &project{p: p, m: &Manager{User: true}, renderDir: filepath.Join(p.Dir, RenderDirName)}
 	switch verb {
 	case "up":
 		return pr.up(args)
@@ -174,6 +231,8 @@ func projectMode(cfg, verb string, args []string, f flags) error {
 		return pr.m.ExecSystemctl(append([]string{verb}, ours...)...)
 	case "build":
 		return pr.build(args)
+	case "run", "exec":
+		return pr.runOneOff(verb, args)
 	case "config":
 		return pr.config()
 	case "top":
@@ -364,6 +423,68 @@ func healthOf(st UnitState, probeExit int) string {
 var journalValueFlags = map[string]bool{"-n": true, "-o": true, "-u": true, "-p": true, "-g": true, "-t": true, "-S": true, "-U": true, "-c": true, "-F": true, "-D": true, "-M": true,
 	"--lines": true, "--output": true, "--unit": true, "--priority": true, "--grep": true, "--identifier": true, "--since": true, "--until": true, "--cursor": true, "--after-cursor": true, "--cursor-file": true, "--field": true, "--directory": true, "--file": true, "--root": true, "--image": true, "--machine": true, "--namespace": true, "--facility": true, "--output-fields": true}
 
+// composeLogFlags rewrites compose's `logs` flags into journalctl's:
+// --tail N (all: no limit), --no-log-prefix, --timestamps (journal lines
+// always carry one) and, inside a project, -t for it too (outside one, -t
+// is journalctl's --identifier); a bare compose duration for --since or
+// --until (42m) becomes the relative form journalctl takes (-42m).
+func composeLogFlags(args []string, project bool) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		value := func() (string, bool) {
+			if k, v, ok := strings.Cut(a, "="); ok && strings.HasPrefix(k, "--") {
+				return v, true
+			}
+			// A flag is never another flag's value. Leaving it where it is
+			// costs nothing: journalArgs pairs what follows a value-taking
+			// flag with it anyway, and journalctl's own --since -1h needs no
+			// rewriting.
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+				return args[i], true
+			}
+			return "", false
+		}
+		switch {
+		case a == "--tail" || strings.HasPrefix(a, "--tail="):
+			v, ok := value()
+			switch {
+			case !ok || v == "":
+				out = append(out, a) // no count given: journalctl refuses it by name
+			case v == "all":
+			default:
+				out = append(out, "-n", v)
+			}
+		case a == "--timestamps" || a == "-t" && project:
+		case a == "--no-log-prefix":
+			out = append(out, "-o", "cat")
+		case a == "--since" || a == "--until" || strings.HasPrefix(a, "--since=") || strings.HasPrefix(a, "--until="):
+			flag, _, _ := strings.Cut(a, "=")
+			if v, ok := value(); ok {
+				if reGoDuration.MatchString(v) {
+					v = "-" + v
+				}
+				out = append(out, flag, v)
+			} else {
+				out = append(out, a)
+			}
+		default:
+			out = append(out, a)
+			// A journalctl flag's own value is that value, never a compose
+			// flag: `logs -g --tail 5` greps for "--tail", as journalctl
+			// reads it, instead of turning the pattern into -n 5.
+			if journalValueFlags[a] && i+1 < len(args) {
+				i++
+				out = append(out, args[i])
+			}
+		}
+	}
+	return out
+}
+
+var reGoDuration = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?(h|m|s|ms|us|ns))+$`)
+
 // journalArgs turns compose-style `logs [flags] [name...]` into journalctl
 // arguments; toUnit maps a bare word to a unit, or returns "" to refuse it.
 func journalArgs(args []string, toUnit func(string) (string, error)) ([]string, []string, error) {
@@ -399,7 +520,7 @@ func journalArgs(args []string, toUnit func(string) (string, error)) ([]string, 
 }
 
 func (pr *project) logs(args []string) error {
-	flags, units, err := journalArgs(args, func(name string) (string, error) {
+	flags, units, err := journalArgs(composeLogFlags(args, true), func(name string) (string, error) {
 		s, err := pr.p.Lookup(name)
 		if err != nil {
 			return "", err
@@ -427,9 +548,11 @@ type planRow struct {
 }
 
 func (pr *project) up(args []string) error {
-	force, buildAll, recreateAll, noRecreate := false, false, false, false
+	force, buildAll, recreateAll, noRecreate, dryRun := false, false, false, false, false
 	for _, a := range args {
 		switch a {
+		case "--dry-run":
+			dryRun = true
 		case "--force":
 			force = true
 		case "--build":
@@ -456,25 +579,15 @@ func (pr *project) up(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(unitDir, 0o755); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(pr.renderDir, 0o755); err != nil {
-		return err
-	}
-	// A render directory that ignores itself: nothing to add to the project's
-	// own .gitignore, nothing generated ever lands in a commit.
-	if err := os.WriteFile(filepath.Join(pr.renderDir, ".gitignore"), []byte("*\n"), 0o644); err != nil {
-		return err
-	}
 
 	// Verify in a staging directory so a rejected render never replaces a
-	// live file. Any output refuses: a warning is a typo systemd would ignore.
-	staging := filepath.Join(pr.renderDir, ".staging")
-	os.RemoveAll(staging)
-	if err := os.MkdirAll(staging, 0o755); err != nil {
+	// live file, and outside the project so a dry run writes nothing there.
+	// Any output refuses: a warning is a typo systemd would ignore.
+	staging, err := os.MkdirTemp("", "systemd-compose-verify-")
+	if err != nil {
 		return err
 	}
+	defer os.RemoveAll(staging)
 	var stagingPaths []string
 	for _, u := range pr.rendered {
 		p := filepath.Join(staging, u.Name)
@@ -484,7 +597,6 @@ func (pr *project) up(args []string) error {
 		stagingPaths = append(stagingPaths, p)
 	}
 	out, verr := pr.m.Verify(stagingPaths)
-	os.RemoveAll(staging)
 	if out != "" || verr != nil {
 		msg := strings.ReplaceAll(out, staging+"/", "")
 		if msg == "" {
@@ -630,6 +742,22 @@ func (pr *project) up(args []string) error {
 	}
 	for _, s := range builds {
 		fmt.Printf("  build %s: %d step(s)\n", s.Name, len(s.Build.Run))
+	}
+	if dryRun {
+		fmt.Println("dry run: nothing built, written, registered, started or retired")
+		return nil
+	}
+
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(pr.renderDir, 0o755); err != nil {
+		return err
+	}
+	// A render directory that ignores itself: nothing to add to the project's
+	// own .gitignore, nothing generated ever lands in a commit.
+	if err := os.WriteFile(filepath.Join(pr.renderDir, ".gitignore"), []byte("*\n"), 0o644); err != nil {
+		return err
 	}
 
 	// Act, in order: build, reset-failed, write, link, enable the target,
@@ -1014,18 +1142,13 @@ func (pr *project) runBuild(s *Service) error {
 		args := []string{pr.m.scope(), "--wait", "--pipe", "--collect", "--quiet",
 			"--description=" + pr.p.Name + ": build " + s.Name,
 			"-p", "WorkingDirectory=" + s.WorkingDir, "-p", "Slice=" + pr.p.SliceName()}
+		// systemd-run -p is literal: no specifiers (refused at load), and
+		// %% would arrive as two percent signs.
+		env := make([]KV, 0, len(s.Environment))
 		for _, kv := range s.Environment {
-			// systemd-run -p is literal: no specifiers (refused at load), and
-			// %% would arrive as two percent signs.
-			args = append(args, "-p", "Environment="+envAssignment(KV{kv.Key, strings.ReplaceAll(kv.Value, "%%", "%")}))
+			env = append(env, KV{kv.Key, strings.ReplaceAll(kv.Value, "%%", "%")})
 		}
-		for _, ef := range s.EnvFiles {
-			p := ef.Path
-			if !ef.Required {
-				p = "-" + p
-			}
-			args = append(args, "-p", "EnvironmentFile="+p)
-		}
+		args = append(args, envProps(env, s.EnvFiles)...)
 		args = append(args, "--")
 		for _, w := range splitWords(cmd) {
 			args = append(args, execLiteral(w)) // the manager expands $VAR in a transient ExecStart too
@@ -1037,6 +1160,313 @@ func (pr *project) runBuild(s *Service) error {
 		}
 	}
 	return nil
+}
+
+// ---- ls -----------------------------------------------------------------------
+
+// listProjects lists every project registered on the user instance: a link
+// into a render directory is a project's unit, and the marker in the file it
+// points at names the project, its yaml and the service the unit belongs to.
+// The count is of services, not units: the marker groups a service's units
+// (its socket is not a second service), and the one that stands for it is
+// its timer when it has one, since a job's own service runs only while the
+// timer fires it. The project's slice and target carry no service and are
+// not counted.
+func listProjects(m *Manager) error {
+	unitDir, err := m.UnitDir()
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(unitDir)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	type project struct {
+		name, config string
+		services     map[string][]string // service name -> the units it rendered
+		order        []string            // the service names, in the order found
+	}
+	byKey := map[string]*project{}
+	var keys []string
+	for _, e := range entries {
+		if e.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		target, err := os.Readlink(filepath.Join(unitDir, e.Name()))
+		if err != nil || filepath.Base(filepath.Dir(target)) != RenderDirName {
+			continue
+		}
+		data, err := os.ReadFile(target)
+		name, config := markerValue(string(data), "Project"), markerValue(string(data), "Config")
+		service := markerValue(string(data), "Service")
+		if err != nil || name == "" {
+			// Nobody's provenance can be read, so the unit stands for itself.
+			name, config, service = "?", filepath.Dir(filepath.Dir(target))+" (render file unreadable)", e.Name()
+		}
+		k := name + "\x00" + config
+		if byKey[k] == nil {
+			byKey[k] = &project{name: name, config: config, services: map[string][]string{}}
+			keys = append(keys, k)
+		}
+		p := byKey[k]
+		if service == "" {
+			continue // the project's slice or target
+		}
+		if _, dup := p.services[service]; !dup {
+			p.order = append(p.order, service)
+		}
+		p.services[service] = append(p.services[service], e.Name())
+	}
+	if len(keys) == 0 {
+		fmt.Println("no project is registered on the user instance")
+		return nil
+	}
+	// One unit stands for each service; only those need their state.
+	stands := map[string]string{} // project key + service -> unit
+	var all []string
+	for _, k := range keys {
+		p := byKey[k]
+		for _, s := range p.order {
+			rep := ""
+			for _, u := range p.services[s] {
+				if strings.HasSuffix(u, ".timer") {
+					rep = u
+					break
+				}
+				if rep == "" || strings.HasSuffix(u, ".service") {
+					rep = u
+				}
+			}
+			stands[k+"\x00"+s] = rep
+			all = append(all, rep)
+		}
+	}
+	states := map[string]UnitState{}
+	if len(all) > 0 { // systemctl show with no unit shows the manager's own
+		if states, err = m.States(all); err != nil {
+			return err
+		}
+	}
+	sort.Strings(keys)
+	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tSTATUS\tCONFIG")
+	for _, k := range keys {
+		p := byKey[k]
+		active, total := 0, 0
+		for _, s := range p.order {
+			total++
+			if states[stands[k+"\x00"+s]].Active() {
+				active++
+			}
+		}
+		status := fmt.Sprintf("running %d/%d", active, total)
+		if active == 0 {
+			status = fmt.Sprintf("stopped 0/%d", total)
+		}
+		config := p.config
+		if _, err := os.Stat(config); err != nil && p.name != "?" {
+			config += " (gone)"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\n", p.name, status, config)
+	}
+	return w.Flush()
+}
+
+// ---- run / exec ---------------------------------------------------------------
+
+// runOneOff runs a command in a service's environment through a transient
+// unit, as build steps run: its working directory, environment, env files
+// and slice; with no command, run runs the service's own. A service this
+// project registered lends what systemd runs it with, read over D-Bus
+// (specifiers expanded); one never brought up lends the yaml's, which then
+// may hold no specifier, since systemd-run -p passes values literally. No
+// dependency is started (compose's --no-deps); the exit code is the
+// command's.
+func (pr *project) runOneOff(verb string, args []string) error {
+	var extra []string // -e KEY=VAL
+	workdir, pipe := "", false
+	i := 0
+flags:
+	for ; i < len(args); i++ {
+		a := args[i]
+		value := func() (string, error) {
+			if _, v, ok := strings.Cut(a, "="); ok && strings.HasPrefix(a, "--") {
+				return v, nil
+			}
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("%s: %s needs a value", verb, a)
+			}
+			i++
+			return args[i], nil
+		}
+		switch {
+		case a == "-e" || a == "--env" || strings.HasPrefix(a, "--env="):
+			v, err := value()
+			if err != nil {
+				return err
+			}
+			if k, _, ok := strings.Cut(v, "="); !ok || !isVarName(k) {
+				return fmt.Errorf("%s: -e %q: KEY=value", verb, v)
+			}
+			extra = append(extra, v)
+		case a == "-w" || a == "--workdir" || strings.HasPrefix(a, "--workdir="):
+			v, err := value()
+			if err != nil {
+				return err
+			}
+			workdir = v
+		case a == "-T" || a == "--no-TTY":
+			pipe = true
+		case a == "--rm" || a == "--no-deps" || a == "-i" || a == "--interactive":
+			// compose's flags for what happens here anyway
+		case a == "--":
+			i++
+			break flags
+		case strings.HasPrefix(a, "-"):
+			return fmt.Errorf("%s: unknown flag %q (known: -e KEY=VAL, -w DIR, -T)", verb, a)
+		default:
+			break flags
+		}
+	}
+	if i >= len(args) {
+		return fmt.Errorf("%s needs a service (services: %s)", verb, strings.Join(pr.p.ServiceNames(), ", "))
+	}
+	s, err := pr.p.Lookup(args[i])
+	if err != nil {
+		return err
+	}
+	cmd := args[i+1:]
+	if len(cmd) > 0 && cmd[0] == "--" {
+		cmd = cmd[1:] // systemd-run's habit; the service name already ended the flags
+	}
+	if verb == "exec" && len(cmd) == 0 {
+		return fmt.Errorf("exec needs a command (run SERVICE with none runs the service's own)")
+	}
+	if workdir == "" {
+		workdir = s.WorkingDir
+	} else if !filepath.IsAbs(workdir) {
+		workdir = filepath.Join(s.WorkingDir, workdir)
+	}
+	// Checked here, because systemd answers a missing one with exit 200 and,
+	// under --quiet, not a word about why.
+	st, err := os.Stat(workdir)
+	if err != nil {
+		return fmt.Errorf("%s: working directory: %v", verb, err)
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("%s: working directory %s: not a directory", verb, workdir)
+	}
+
+	unitDir, err := pr.m.UnitDir()
+	if err != nil {
+		return err
+	}
+	opt, err := DefaultRenderOptions() // the search path alone; run renders nothing
+	if err != nil {
+		return err
+	}
+	unit := pr.p.ServiceUnit(s)
+	var env, argv []string
+	switch r := pr.registrationOf(unitDir, unit); r.kind {
+	case "ours":
+		if env, argv, err = pr.m.ServiceRun(unit); err != nil {
+			return err
+		}
+	case "none":
+		for _, kv := range s.Environment {
+			if usesSpecifier(kv.Value) {
+				return fmt.Errorf("%s: environment: %s uses a specifier, which only systemd expands; up registers %s, and %s then reads its environment from systemd", verb, kv.Key, s.Name, verb)
+			}
+			env = append(env, kv.Key+"="+strings.ReplaceAll(kv.Value, "%%", "%"))
+		}
+		if len(cmd) == 0 {
+			if s.Command.Empty() && s.Entrypoint.Empty() {
+				return fmt.Errorf("run: %s has only a raw ExecStart=; give the command (or up it first)", s.Name)
+			}
+			line, err := execLine(s.Entrypoint, s.Command, s.WorkingDir, opt.SearchPath)
+			if err != nil {
+				return err
+			}
+			if usesSpecifier(line) {
+				return fmt.Errorf("run: %s's command uses a specifier, which only systemd expands; up it first, or give the command", s.Name)
+			}
+			argv = splitWords(strings.ReplaceAll(line, "%%", "%")) // already written $$ for systemd
+		}
+	default:
+		return fmt.Errorf("%s: %s is %s; this project does not own it", verb, unit, r.owner)
+	}
+	if len(cmd) > 0 {
+		prog, err := resolveWord(cmd[0], workdir, opt.SearchPath)
+		if err != nil {
+			return fmt.Errorf("%s: %w", verb, err)
+		}
+		if strings.Contains(prog, "%") {
+			return fmt.Errorf("%s: %q: systemd-run does not expand specifiers", verb, cmd[0])
+		}
+		argv = []string{prog}
+		for _, w := range cmd[1:] {
+			argv = append(argv, execLiteral(w)) // the manager expands $VAR in a transient ExecStart
+		}
+	}
+	if len(argv) == 0 {
+		return fmt.Errorf("run: %s has no command to run", s.Name)
+	}
+
+	runArgs := []string{pr.m.scope(), "--wait", "--collect", "--quiet",
+		"--description=" + pr.p.Name + ": " + verb + " " + s.Name,
+		"-p", "WorkingDirectory=" + workdir, "-p", "Slice=" + pr.p.SliceName()}
+	if pipe || !terminal(os.Stdin) || !terminal(os.Stdout) {
+		runArgs = append(runArgs, "--pipe")
+	} else {
+		runArgs = append(runArgs, "--pty")
+	}
+	kvs := make([]KV, 0, len(env))
+	for _, e := range env {
+		k, v, _ := strings.Cut(e, "=")
+		kvs = append(kvs, KV{k, v})
+	}
+	runArgs = append(runArgs, envProps(kvs, s.EnvFiles)...)
+	runArgs = append(runArgs, "--")
+	if len(extra) > 0 {
+		// EnvironmentFile= overrides Environment= whatever the order they
+		// are given in, so -e goes through env(1), which runs
+		// after systemd has assembled the unit's environment: compose's
+		// precedence, where -e wins over the service's env_file.
+		prog, err := resolveWord("env", workdir, opt.SearchPath)
+		if err != nil {
+			return fmt.Errorf("%s: -e needs env: %w", verb, err)
+		}
+		runArgs = append(runArgs, prog, "--")
+		for _, e := range extra {
+			runArgs = append(runArgs, execLiteral(e)) // the manager expands $VAR in a transient ExecStart
+		}
+	}
+	runArgs = append(runArgs, argv...)
+	c := exec.Command("systemd-run", runArgs...)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return asExit(c.Run())
+}
+
+// envProps spells a service's environment and env files as systemd-run -p
+// arguments, for the two verbs that run a command in it (build and run).
+func envProps(env []KV, files []EnvFile) []string {
+	var out []string
+	for _, kv := range env {
+		out = append(out, "-p", "Environment="+envAssignment(kv))
+	}
+	for _, ef := range files {
+		p := ef.Path
+		if !ef.Required {
+			p = "-" + p
+		}
+		out = append(out, "-p", "EnvironmentFile="+p)
+	}
+	return out
+}
+
+func terminal(f *os.File) bool {
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
 // ---- probe (hidden; the healthcheck's ExecStartPost) --------------------------
@@ -1128,7 +1558,7 @@ func instanceMode(m *Manager, verb string, args []string) error {
 		}
 		return m.ExecSystemctl(append([]string{"list-units", "--type=service,timer"}, args...)...)
 	case "logs":
-		flags, units, err := journalArgs(args, func(w string) (string, error) { return w, nil })
+		flags, units, err := journalArgs(composeLogFlags(args, false), func(w string) (string, error) { return w, nil })
 		if err != nil {
 			return err
 		}

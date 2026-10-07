@@ -21,6 +21,11 @@ import (
 
 const ConfigFileName = "systemd-compose.yaml"
 
+// RenderDirName is the directory in the project that holds the rendered
+// units. A link into one is how a registered unit names the project it
+// belongs to, so the name has one owner here.
+const RenderDirName = ".systemd-compose"
+
 // ProjectNameVar overrides the project name from the environment or from a
 // `.env` file beside the yaml. The project name is the namespace: every
 // unit, the target and the slice carry it, so two clones of one project, or
@@ -99,8 +104,9 @@ type EnvFile struct {
 }
 
 type Restart struct {
-	Policy string // no | on-failure | always
-	Delay  string // RestartSec, optional
+	Policy  string // no | on-failure | always
+	Written string // the yaml's own word, for messages: unless-stopped is always
+	Delay   string // RestartSec, optional
 }
 
 type Dependency struct {
@@ -335,6 +341,7 @@ func parse(data []byte, abs string, override, from string, vars map[string]strin
 	if err != nil {
 		return nil, err
 	}
+	top = withoutExtensions(top)
 	// The schema is unversioned on purpose while the only files are the
 	// author's own; a habitual compose `version:` gets a pointed message.
 	if vn := top.get("version"); vn != nil {
@@ -491,11 +498,16 @@ func (p *Project) Lookup(name string) (*Service, error) {
 	if s := p.Service(name); s != nil {
 		return s, nil
 	}
-	var names []string
+	return nil, fmt.Errorf("no service %q in project %s (services: %s)", name, p.Name, strings.Join(p.ServiceNames(), ", "))
+}
+
+// ServiceNames lists every service the file declares, in file order.
+func (p *Project) ServiceNames() []string {
+	names := make([]string, 0, len(p.Services))
 	for _, s := range p.Services {
 		names = append(names, s.Name)
 	}
-	return nil, fmt.Errorf("no service %q in project %s (services: %s)", name, p.Name, strings.Join(names, ", "))
+	return names
 }
 
 func sanitizeName(base string) string {
@@ -511,6 +523,7 @@ func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	m = withoutExtensions(m)
 	if err := unknownKeys(m, ctx, serviceKeys...); err != nil {
 		return nil, err
 	}
@@ -661,7 +674,7 @@ func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 		}
 	}
 	if svc.Schedule != nil && svc.Restart != nil && svc.Restart.Policy == "always" {
-		return nil, fmt.Errorf("line %d: %s: schedule: with restart: always would restart a finished job forever; drop one", node.Line, ctx)
+		return nil, fmt.Errorf("line %d: %s: schedule: with restart: %s would restart a finished job forever; drop one", node.Line, ctx, svc.Restart.Written)
 	}
 	if svc.Build != nil {
 		for _, kv := range svc.Environment {
@@ -946,10 +959,18 @@ func parseRestart(n *yaml.Node, ctx string) (*Restart, error) {
 	default:
 		return nil, fmt.Errorf("line %d: %s: restart: is a policy or {policy, delay}", n.Line, ctx)
 	}
-	switch r.Policy {
-	case "no", "on-failure", "always":
+	r.Written = r.Policy
+	switch {
+	case r.Policy == "no" || r.Policy == "on-failure" || r.Policy == "always":
+	case r.Policy == "unless-stopped":
+		// compose's habit, and systemd's always already is it: a unit
+		// stopped by hand is never restarted. (At boot the target starts it
+		// again, where docker would leave it stopped.)
+		r.Policy = "always"
+	case strings.HasPrefix(r.Policy, "on-failure:"):
+		return nil, fmt.Errorf("line %d: %s: restart: %q has no faithful systemd form: docker counts automatic restarts and forgets them on a manual start, systemd's start limit counts every start, manual ones included; write restart: on-failure and set unit: Unit: StartLimitBurst: and StartLimitIntervalSec: yourself", n.Line, ctx, r.Policy)
 	default:
-		return nil, fmt.Errorf("line %d: %s: restart: %q; use no, on-failure or always", n.Line, ctx, r.Policy)
+		return nil, fmt.Errorf("line %d: %s: restart: %q; use no, on-failure, always or unless-stopped", n.Line, ctx, r.Policy)
 	}
 	return r, nil
 }
@@ -1358,10 +1379,15 @@ func mapping(n *yaml.Node, ctx string) (*mapNode, error) {
 	}
 	m := &mapNode{line: n.Line}
 	seen := map[string]int{}
+	var merges []*yaml.Node
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k := n.Content[i]
 		if k.Kind != yaml.ScalarNode {
 			return nil, fmt.Errorf("line %d: %s: keys must be plain words", k.Line, ctx)
+		}
+		if k.Tag == "!!merge" {
+			merges = append(merges, n.Content[i+1])
+			continue
 		}
 		if first, dup := seen[k.Value]; dup {
 			return nil, fmt.Errorf("line %d: %s: key %q already given on line %d; a second one would silently win or lose", k.Line, ctx, k.Value, first)
@@ -1369,7 +1395,53 @@ func mapping(n *yaml.Node, ctx string) (*mapNode, error) {
 		seen[k.Value] = k.Line
 		m.pairs = append(m.pairs, kvNode{k, n.Content[i+1]})
 	}
+	// yaml merge keys, compose's way to reuse a block: `<<: *base` or
+	// `<<: [*a, *b]` add the keys this map does not give itself, an earlier
+	// source winning over a later one.
+	for _, v := range merges {
+		if v.Kind == yaml.AliasNode {
+			v = v.Alias
+		}
+		sources := []*yaml.Node{v}
+		if v.Kind == yaml.SequenceNode {
+			sources = v.Content
+		}
+		for _, src := range sources {
+			// The shape is checked here, so what mapping() refuses inside a
+			// merged block is reported as itself: a duplicate key in an
+			// anchor must not read as "<< merges a map".
+			shape := src
+			if shape.Kind == yaml.AliasNode && shape.Alias != nil {
+				shape = shape.Alias
+			}
+			if shape.Kind != yaml.MappingNode {
+				return nil, fmt.Errorf("line %d: %s: << merges a map or a list of maps", src.Line, ctx)
+			}
+			sm, err := mapping(shape, ctx+": <<")
+			if err != nil {
+				return nil, err
+			}
+			for _, kv := range sm.pairs {
+				if _, given := seen[kv.key.Value]; !given {
+					seen[kv.key.Value] = kv.key.Line
+					m.pairs = append(m.pairs, kv)
+				}
+			}
+		}
+	}
 	return m, nil
+}
+
+// withoutExtensions drops compose's x- keys from a top-level or service map:
+// they hold blocks for anchors to reuse and mean nothing themselves.
+func withoutExtensions(m *mapNode) *mapNode {
+	out := &mapNode{line: m.line}
+	for _, kv := range m.pairs {
+		if !strings.HasPrefix(kv.key.Value, "x-") {
+			out.pairs = append(out.pairs, kv)
+		}
+	}
+	return out
 }
 
 func unknownKeys(m *mapNode, ctx string, allowed ...string) error {

@@ -2,7 +2,8 @@
 
 docker-compose verbs over systemd, with a project-local `systemd-compose.yaml`.
 
-Inside a project directory, or any directory below one, `up` renders unit
+Inside a project directory, or any directory below one (or from anywhere,
+with `-f path/to/systemd-compose.yaml` before the verb), `up` renders unit
 files from the yaml, registers them with the user manager, and starts them;
 `down` unregisters them; `ps`, `logs`, `start`, `stop`, `restart`, `build`,
 `config` and `top` are scoped to that project. Outside a project, the same
@@ -61,7 +62,9 @@ services:
 ```
 sc up          # render, verify, register, start; restart what changed
 sc ps          # the project's units
-sc logs -f api # journalctl, scoped
+sc logs -f api # journalctl, scoped; compose's --tail, --since 10m, -t and
+               # --no-log-prefix work too
+sc run api npm run migrate   # one-off, in api's environment
 sc down        # stop and unregister; the rendered files stay
 ```
 
@@ -115,6 +118,23 @@ syntax) may use compose's interpolation: `$VAR`, `${VAR}`, `${VAR:-default}`,
 `$$` is a literal `$` and reaches the program as one, so `command: sh -c
 'echo $$HOME'` leaves `$HOME` to the shell.
 
+A block several services share goes under an `x-` key (top level, or inside
+a service), which the tool ignores, and comes back through yaml's anchors and
+merge keys, as in compose:
+
+```yaml
+x-base: &base
+  restart: unless-stopped
+  environment: {ROLE: worker}
+services:
+  w1: {<<: *base, command: worker.sh}
+  w2: {<<: [*base], command: worker.sh, environment: {ROLE: special}}
+```
+
+A key the service gives itself wins over a merged one, and the earlier of
+two merged blocks wins; a merged map such as `environment:` is replaced
+whole, not combined (yaml's rule).
+
 `%` is systemd's: in `command`, `healthcheck`, `environment`, `listen` and
 `schedule`, `%h`, `%t`, `%U` and the rest of systemd's specifiers (as of
 systemd 248) are left for the manager to expand, so `environment:
@@ -131,7 +151,7 @@ tool reads those paths itself.
 | `working_dir` | `WorkingDirectory=`, default the project directory |
 | `environment` | `Environment=` lines; `$` is literal, `%` a specifier (above); a bare `KEY` is refused, nothing is captured from your shell |
 | `env_file` | `EnvironmentFile=`; a change to the file is a change to the unit |
-| `restart` | `Restart=`, `RestartSec=` |
+| `restart` | `Restart=`, `RestartSec=`. `unless-stopped` is `always`: systemd never restarts a unit you stopped, though at boot the project starts it again. `on-failure:N` is refused: systemd's start limit counts manual starts too, so set `unit: Unit: StartLimitBurst:` yourself |
 | `depends_on` | `After=` + `Wants=`; `required: true` → `Requires=`; `restart: true` → `PartOf=`. `condition: service_healthy` and `service_completed_successfully` always render `Requires=`, since a `Wants=` dependent would start even when the dependency fails |
 | `healthcheck` | an `ExecStartPost=` probe; the unit is not "started" until it passes, so dependents wait. `ps` shows the verdict in a HEALTH column: `starting`, `ready`, `probe failed` |
 | `oneshot` | `Type=oneshot`, `RemainAfterExit=yes`; a job dependents can wait for |
@@ -148,7 +168,8 @@ tool reads those paths itself.
    a staging directory. Any output refuses: a misspelled directive is a
    warning systemd would otherwise ignore.
 2. Prints the plan: per unit `new`, `unchanged`, `changed`, or one of the two
-   kinds of changed explained in step 4, and what will happen.
+   kinds of changed explained in step 4, and what will happen. `up
+   --dry-run` stops here, having written nothing.
 3. Runs `build` steps whose `creates:` path is missing.
 4. Writes the files into `.systemd-compose/` (which ignores itself in git),
    links them with `systemctl --user link`, enables the target, starts
@@ -180,6 +201,18 @@ yaml registered from this directory, active or not (no `--force`: `down` is
 the verb that stops things), so nothing of the project stays registered. The
 current units' rendered files stay, as compose keeps the compose file; a
 retired orphan's file goes.
+
+## One-off commands
+
+`run SERVICE [CMD...]` runs a command as a transient unit in the service's
+working directory, environment, env files and slice, and returns its exit
+code; with no command it runs the service's own, so `run backup` fires a
+scheduled job now. `exec SERVICE CMD...` is the same with the command
+required. `-e KEY=VAL`, `-w DIR` and `-T` (no terminal) are compose's; a
+terminal gets a pty. Once `up` has registered the service, the environment
+and command are the ones systemd runs it with, specifiers expanded; before
+that they come from the yaml, which may then use no specifier. Nothing else
+is started: dependencies are `up`'s business (compose's `--no-deps`).
 
 ## Overrides outside the yaml
 
@@ -227,6 +260,7 @@ sc restart api db  # name them: a bare restart would also restart start-only ser
 ## Outside a project
 
 ```
+sc ls                   # every project registered here: name, services running/total, yaml
 sc ps -a                # every service and timer on your user instance
 sc logs -f foo          # journalctl --user -u foo -f
 sc up foo.timer         # enable --now

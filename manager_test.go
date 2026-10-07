@@ -99,3 +99,13 @@ ExecStartPost={ path=/bin/false ; argv[]=/bin/false ; ignore_errors=no ; start_t
 		}
 	}
 }
+
+// A unit name as a D-Bus object path label (systemd's bus_label_escape).
+func TestBusEscape(t *testing.T) {
+	cases := map[string]string{"my_app-web.service": "my_5fapp_2dweb_2eservice", "9p-a.service": "_39p_2da_2eservice", "a9": "a9"}
+	for in, want := range cases {
+		if got := busEscape(in); got != want {
+			t.Errorf("busEscape(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

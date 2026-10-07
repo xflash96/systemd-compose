@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -202,6 +203,61 @@ func fieldOf(s, key string) string {
 		v = v[:j]
 	}
 	return v
+}
+
+// busProperty reads one property of a unit over D-Bus as JSON: the value
+// systemd holds, specifiers expanded and nothing quoted, which no
+// systemctl show line gives back exactly.
+func (m *Manager) busProperty(unit, iface, prop string, into any) error {
+	path := "/org/freedesktop/systemd1/unit/" + busEscape(unit)
+	out, err := exec.Command("busctl", m.scope(), "--json=short", "get-property", "org.freedesktop.systemd1", path, iface, prop).Output()
+	if err != nil {
+		return fmt.Errorf("busctl get-property %s %s: %v", unit, prop, asExit(err))
+	}
+	var v struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(out, &v); err != nil {
+		return fmt.Errorf("busctl %s %s: %v", unit, prop, err)
+	}
+	return json.Unmarshal(v.Data, into)
+}
+
+// busEscape spells a unit name as a D-Bus object path label: every byte
+// but a letter, or a digit after the first, becomes _xx.
+func busEscape(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || i > 0 && c >= '0' && c <= '9' {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "_%02x", c)
+		}
+	}
+	return b.String()
+}
+
+// ServiceRun is what systemd runs a loaded service with: its environment
+// and its first ExecStart= argv, both as systemd expanded them.
+func (m *Manager) ServiceRun(unit string) (env, argv []string, err error) {
+	if err := m.busProperty(unit, "org.freedesktop.systemd1.Service", "Environment", &env); err != nil {
+		return nil, nil, err
+	}
+	var execs [][]json.RawMessage // (path, argv, ignore, times...)
+	if err := m.busProperty(unit, "org.freedesktop.systemd1.Service", "ExecStart", &execs); err != nil {
+		return nil, nil, err
+	}
+	// A unit systemd cannot load answers every property with its empty
+	// value, so an empty ExecStart= is the one signal that the environment
+	// just read is nobody's rather than the service's.
+	if len(execs) == 0 || len(execs[0]) < 2 {
+		return nil, nil, fmt.Errorf("%s is registered but systemd has no ExecStart= for it; is its rendered file gone? (up writes it again)", unit)
+	}
+	if err := json.Unmarshal(execs[0][1], &argv); err != nil {
+		return nil, nil, err
+	}
+	return env, argv, nil
 }
 
 // UnitDir is where this instance's persistent unit links live.
