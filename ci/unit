@@ -1,6 +1,7 @@
 #!/bin/bash
-# ci/unit — what needs no systemd: formatting, vet and the test suite.
-# Needs Go.
+# ci/unit — what needs no systemd: formatting, vet, staticcheck, the test
+# suite under the race detector, and the man page's markup where groff is
+# installed. Needs Go and a C compiler (the race detector's).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 unformatted=$(gofmt -l .)
@@ -9,4 +10,10 @@ if [ -n "$unformatted" ]; then
 	exit 1
 fi
 go vet ./...
-go test -count=1 ./...
+go vet -tags e2e ./e2e # built only with its tag, so vetted on its own
+go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 -tags e2e ./...
+go test -race -count=1 ./...
+if command -v groff >/dev/null; then
+	warned=$(groff -man -ww -z docs/systemd-compose.1 2>&1)
+	[ -z "$warned" ] || { echo "docs/systemd-compose.1: $warned"; exit 1; }
+fi

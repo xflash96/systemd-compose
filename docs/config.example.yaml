@@ -1,0 +1,321 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/xflash96/systemd-compose/main/config-schema.json
+#
+# systemd-compose.yaml reference
+# ------------------------------
+#
+# Every key systemd-compose reads, in use, in one imaginary project:
+# "bookshelf", a lending-library web app with a database, an API, a web
+# front, a worker and three scheduled jobs. Search it for a key.
+#
+# - The programs are imaginary (bookshelf-api, pgweb ...), so this file
+#   loads only where they exist.
+# - The modeline above gives editors with a YAML language server completion
+#   and checks from config-schema.json. Copy it into your own file.
+#
+# Variables: any value (never a key, nothing under unit:) may use $VAR,
+# ${VAR}, ${VAR:-default}, ${VAR-default}, ${VAR:?error}, ${VAR?error},
+# ${VAR:+other} and ${VAR+other}.
+# - the variables come from the .env beside this file, never from your shell
+# - a variable that is unset and has no default is an error
+# - $$ is a literal $
+#
+# Specifiers: command:, entrypoint:, healthcheck: test:, environment: and
+# listen: may use systemd's specifiers, which systemd expands when the unit
+# runs.
+# - %h is your home directory, %t the runtime directory ($XDG_RUNTIME_DIR)
+# - %% is a literal %
+# - schedule:, working_dir:, env_file: and build: creates: take no %
+
+# name: the project's name, the prefix of every unit
+# - optional, default: the directory's name
+# - letters, digits and _; no dash; at most 200 characters
+# - -p NAME, or SYSTEMD_COMPOSE_PROJECT_NAME in the environment or in the
+#   .env beside this file, overrides it
+name: bookshelf
+
+# resources: a cap on the whole project, on its slice
+# - optional, default: no cap
+# - a change applies in place and restarts nothing
+# - the same keys on a service cap that service alone (see api)
+resources:
+  # memory: MemoryMax=
+  # - optional
+  # - bytes, with an optional K, M, G or T
+  memory: 4G
+  # pids: TasksMax=, processes and threads of all services together
+  # - optional
+  # - a positive integer
+  pids: 512
+
+# x-ANYTHING: ignored, at the top level or inside a service
+# - optional
+# - holds a yaml anchor that services merge in with <<:, as in compose
+# - a key the service writes itself wins over a merged one
+# - a merged map such as environment: is replaced whole, not combined
+x-node: &node
+  restart: {policy: on-failure, delay: 3s}
+  environment: {NODE_ENV: production}
+
+# services: the services, by name; each becomes bookshelf-NAME.service
+# - required, at least one
+# - a name is letters, digits, _ and -, and does not start with -
+services:
+
+  # ---- db: a long-running daemon ---------------------------------------------
+
+  db:
+    # command: the program and its arguments
+    # - required, unless entrypoint: or unit: Service: ExecStart: gives the
+    #   program
+    # - a string is split by systemd's rules; a list (api) is one word per
+    #   element
+    # - the program is looked up in ~/.local/bin and your PATH when up renders
+    # - nothing else from your shell reaches the service
+    # - there is no shell: ; | > && are refused; write [sh, -c, '...'] for a
+    #   shell line (worker)
+    command: postgres -D data/pg -k %t
+    # restart: when systemd restarts the service
+    # - optional, default: no
+    # - no, on-failure, always, or unless-stopped (the same as always:
+    #   systemd never restarts a unit you stopped by hand)
+    # - the map form {policy, delay} also sets RestartSec= (x-node)
+    restart: always
+    # on_change: what up does when the service's definition changes
+    # - optional, default: restart
+    # - restart: up restarts the service
+    # - start-only: up starts it when it is down, but never restarts it; up
+    #   says so, and the service runs its old definition until you restart it
+    on_change: start-only
+    # unit: raw systemd sections, merged into the unit last
+    # - optional
+    # - sections: Unit, Service, Socket (with listen:), Timer (with schedule:)
+    # - a value is a string, or a list for a directive given several times
+    # - a directive a key above writes (Restart=, OnCalendar= ...) is an error
+    # - Environment=, EnvironmentFile= and WorkingDirectory= are refused: use
+    #   environment:, env_file: and working_dir:, which build and run get too
+    # - up checks the result with systemd-analyze verify, so a misspelled
+    #   directive stops it
+    unit:
+      Unit:
+        Documentation: [https://www.postgresql.org/docs/, "man:postgres(1)"]
+      Service:
+        KillSignal: SIGINT        # postgres's fast shutdown
+        TimeoutStopSec: 90s
+
+  # ---- migrate: a job that runs to completion before the api starts ---------
+
+  migrate:
+    command: [bookshelf-api, migrate]
+    working_dir: api
+    # oneshot: Type=oneshot with RemainAfterExit=yes
+    # - optional, default: false
+    # - the service counts as started once it has exited 0, so another
+    #   service can wait for it (api, condition: service_completed_successfully)
+    # - a oneshot takes no healthcheck: and no restart: always
+    oneshot: true
+    restart: on-failure
+    # depends_on: the services this one starts after
+    # - optional
+    # - a list (worker) is the default edge to each: After= and Wants=
+    # - the map form sets, per service:
+    #   - condition: service_started (default), service_healthy (waits for
+    #     its healthcheck), or service_completed_successfully (waits for it
+    #     to exit 0)
+    #   - required: Requires= instead of Wants=; default false for
+    #     service_started, and always true for the other conditions
+    #   - restart: PartOf=; restarting or stopping that service restarts or
+    #     stops this one; default false
+    # - required: true here means stopping db stops migrate, and starting db
+    #   does not bring it back
+    depends_on:
+      db: {condition: service_started, required: true}
+
+  # ---- api: built, healthchecked, capped ---------------------------------------
+
+  api:
+    <<: *node                     # restart: from x-node; its environment: is replaced below
+    # entrypoint: words put in front of command:
+    # - optional
+    # - a string or a list, as command:
+    # - this unit runs: node --enable-source-maps dist/server.js --port 8080
+    entrypoint: [node, --enable-source-maps]
+    command: [dist/server.js, --port, "${API_PORT:-8080}"]
+    # working_dir: WorkingDirectory=
+    # - optional, default: this file's directory
+    # - relative to this file; it must exist
+    # - no %, no ~
+    working_dir: api
+    # environment: variables for the service
+    # - optional
+    # - a map (here) or a list of KEY=value (worker)
+    # - every key needs a value: nothing is taken from your shell
+    # - with build:, the values take no %, since build steps run without
+    #   specifiers
+    environment:
+      NODE_ENV: production        # repeated: this map replaces x-node's
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    # env_file: env files systemd reads for the service
+    # - optional
+    # - one path (worker), or a list whose entries are a path or
+    #   {path, required}; required defaults to true
+    # - relative to this file
+    # - systemd reads the files: KEY=value lines and quotes, but no `export`,
+    #   no ${} and no comment after a value
+    # - a value from a file wins over environment:, so the two may not set one
+    #   key to different values
+    # - up restarts the service when a file changes
+    env_file:
+      - .env
+      - {path: .env.local, required: false}
+    # depends_on, the map form: condition: service_completed_successfully
+    # waits for migrate to exit 0; restart: true restarts or stops api with db
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      db: {required: true, restart: true}
+    # healthcheck: a readiness probe
+    # - optional
+    # - the service counts as started once test: passes; until then its
+    #   dependents (web) wait
+    # - the probe runs every interval until it passes or start_period is over
+    # - nothing probes the service after it has started
+    healthcheck:
+      # test: the probe's program and its arguments
+      # - required
+      # - a list; no CMD or CMD-SHELL prefix (CMD-SHELL x is [sh, -c, x])
+      test: [curl, -sf, "http://127.0.0.1:${API_PORT:-8080}/health"]
+      # interval: optional, default: 2s; whole seconds
+      interval: 2s
+      # timeout: one test's limit; optional, default: 5s; whole seconds
+      timeout: 5s
+      # start_period: how long the probe keeps trying; optional, default: 60s
+      start_period: 60s
+    # build: steps that make what the service runs; not rendered
+    # - optional
+    # - run: required; the steps, one command each, with no shell: write
+    #   sh -c 'a && b' for two
+    # - creates: optional; what the build makes, relative to working_dir
+    # - the steps run in the service's working directory and environment, in
+    #   the project's slice
+    # - up runs them when creates: is missing, and skips a build without
+    #   creates:; build and up --build always run them
+    # - up restarts a service whose build ran
+    build:
+      run: [npm ci, npm run build]
+      creates: dist/server.js
+    # resources: this service's caps
+    # - optional
+    # - memory: MemoryMax=; bytes, with an optional K, M, G or T
+    # - cpus: CPUQuota=; a number of CPUs, 0.001 to 100000; needs the cpu
+    #   controller delegated to your user manager
+    # - pids: TasksMax=; a positive integer
+    resources:
+      memory: 512M
+      cpus: 1.5                   # CPUQuota=150%
+      pids: 64
+
+  # ---- web: socket-activated ---------------------------------------------------
+
+  web:
+    command: [bookshelf-web, --sockets-from-systemd]
+    restart: unless-stopped
+    # listen: socket activation, for a program that takes its sockets from
+    # LISTEN_FDS
+    # - optional
+    # - one address or a list; each becomes a ListenStream= of
+    #   bookshelf-web.socket
+    # - an address is a port, IP:port (no host name), an absolute path, a
+    #   relative path with a slash (relative to this file), or @abstract
+    # - the socket opens at up; restart keeps it open, so connections wait in
+    #   its backlog
+    # - a oneshot or a scheduled job cannot listen
+    listen: [8000, "127.0.0.1:8443", run/web.sock, "@bookshelf-web"]
+    # depends_on: condition: service_healthy waits for api's healthcheck
+    depends_on:
+      api: {condition: service_healthy}
+    unit:
+      Unit:
+        Description: bookshelf's public web front   # replaces the one the tool writes
+      Socket:
+        Backlog: "256"
+
+  # ---- worker: a shell line, list forms ---------------------------------------
+
+  worker:
+    <<: *node
+    # $$ is a literal $: the shell gets $CONCURRENCY and reads it from the
+    # environment below. A single $ would be filled in from the .env at up.
+    command: [sh, -c, 'exec node dist/worker.js --concurrency "$$CONCURRENCY"']
+    working_dir: api
+    # environment: the list form. It replaces x-node's map whole, so
+    # NODE_ENV is set again.
+    environment:
+      - NODE_ENV=production
+      - CONCURRENCY=4
+    env_file: .env
+    # depends_on: the list form. The worker starts after db and api, and
+    # starts even if they fail.
+    depends_on: [db, api]
+
+  # ---- report: a scheduled job, every option ---------------------------------
+
+  report:
+    command: [bookshelf-api, report, --mail-to, "${REPORT_TO:-librarian@example.org}"]
+    working_dir: api
+    # schedule: a bookshelf-report.timer that starts this service as a oneshot
+    # - optional
+    # - a string is the calendar alone (cleanup); the map form sets:
+    #   - calendar: OnCalendar=; required; `systemd-analyze calendar` checks one
+    #   - accuracy: AccuracySec=; optional, default: 10s
+    #   - persistent: Persistent=; optional, default: true: a run missed while
+    #     the machine was off happens at the next boot
+    #   - randomized_delay: RandomizedDelaySec=; optional
+    # - runs never overlap; `run report` runs it now; ps shows the next run
+    # - a scheduled job takes no healthcheck: and no restart: always
+    schedule:
+      calendar: "Mon *-*-* 07:00:00"
+      accuracy: 1min
+      persistent: true
+      randomized_delay: 10min
+    restart: on-failure
+    unit:
+      Service:
+        Nice: "10"
+
+  # ---- cleanup: a scheduled job, short form ----------------------------------
+
+  cleanup:
+    command: [find, tmp, -name, "*.part", -mmin, "+60", -delete]
+    # schedule: as a string, the calendar alone (hourly, daily, *:0/15 ...)
+    schedule: hourly
+    unit:
+      Timer:
+        OnBootSec: 15min          # and once, 15 minutes after boot
+
+  # ---- backup: the raw form ----------------------------------------------------
+
+  backup:
+    # unit: Service: ExecStart: instead of command:, for what command: does
+    # not take, such as a shell pipeline written as systemd reads it
+    # - systemd's own syntax: no interpolation, %% is a literal % and $$ a
+    #   literal $
+    # - systemd-analyze verify checks it; the tool's own rules do not
+    schedule: daily
+    unit:
+      Service:
+        ExecStart: /bin/sh -c 'pg_dump -h %t bookshelf | gzip > %h/backups/bookshelf.sql.gz'
+
+  # ---- pgweb: only with a profile ------------------------------------------------
+
+  pgweb:
+    # profiles: the service runs only while one of them is active
+    # - optional, default: always active
+    # - a list of names: letters, digits, _ . and -
+    # - activate one with --profile debug before the verb, or
+    #   SYSTEMD_COMPOSE_PROFILES=debug in the environment or the .env;
+    #   --profile '*' activates all
+    # - down and a bare stop act on every profile
+    profiles: [debug]
+    command: [pgweb, --bind, 127.0.0.1, --listen, "8081", --host, "%t"]
+    # depends_on: an empty map is the default edge too
+    depends_on:
+      db: {}

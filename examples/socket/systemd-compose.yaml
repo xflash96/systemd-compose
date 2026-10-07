@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/xflash96/systemd-compose/main/config-schema.json
+#
+# A socket-activated service: systemd holds the listening socket, and hands
+# it to the program. A restart never closes it, so a connection made during
+# the restart waits instead of being refused. README.md says what to try.
+name: hello
+
+services:
+  hello:
+    command: [python3, hello.py]
+    listen: ["127.0.0.1:${PORT:-8090}"]
+    restart: on-failure

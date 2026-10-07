@@ -1,10 +1,12 @@
 #!/bin/bash
-# ci/container [UBUNTU] — run ci/live inside a container that boots systemd,
-# as an unprivileged user with lingering on: another systemd version on
-# this machine, without a CI runner.
+# ci/container [UBUNTU] — run the end-to-end tests (e2e/) inside a
+# container that boots systemd, as an unprivileged user with lingering on,
+# to test against a systemd version other than the host's without a CI
+# runner.
 #
 #   ci/container          Ubuntu 22.04 (systemd 249, the oldest tested)
 #   ci/container 24.04    Ubuntu 24.04 (systemd 255)
+#   E2E_RUN=TestProject ci/container 24.04    only the tests -run selects
 #
 # Needs docker 28 or later (writable-cgroups) with cgroup v2, and Go. Never
 # --privileged: it hands the container the host's devices and /proc/sys,
@@ -28,12 +30,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-(cd "$here" && CGO_ENABLED=0 go build -trimpath -o "$work/systemd-compose" .)
+(cd "$here" && CGO_ENABLED=0 go build -trimpath -o "$work/systemd-compose" . &&
+	CGO_ENABLED=0 go test -c -tags e2e -o "$work/e2e.test" ./e2e)
 
 docker build -q -t "$img" - >/dev/null <<EOF
 FROM ubuntu:$ver
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      systemd systemd-sysv dbus dbus-user-session \
+      systemd systemd-sysv dbus dbus-user-session python3 \
  && rm -rf /var/lib/apt/lists/* \
  && useradd -m -s /bin/bash tester
 RUN printf '[Service]\nType=oneshot\nExecStart=/bin/systemctl --no-block poweroff\n' \
@@ -48,9 +51,10 @@ EOF
 cid=$(docker run -d --cgroupns=private --security-opt writable-cgroups=true \
 	-e container=docker --tmpfs /run --tmpfs /run/lock \
 	-v "$work/systemd-compose:/usr/local/bin/systemd-compose:ro" \
-	-v "$here/ci/live:/usr/local/bin/ci-live:ro" "$img")
+	-v "$work/e2e.test:/usr/local/bin/e2e.test:ro" \
+	-v "$here:/usr/local/src/systemd-compose:ro" "$img")
 
-# Boot, then the tester's user manager through lingering (ci/live waits
+# Boot, then the tester's user manager through lingering (the tests wait
 # for it).
 for _ in $(seq 60); do
 	state=$(docker exec "$cid" systemctl is-system-running 2>/dev/null || true)
@@ -64,7 +68,9 @@ done
 docker exec "$cid" loginctl enable-linger tester
 uid=$(docker exec "$cid" id -u tester)
 
-# The junk overrides prove ci/live clears them (it would rename its project).
+# The junk overrides prove the tests clear them (they would rename a
+# project).
 docker exec -u tester -w /home/tester -e XDG_RUNTIME_DIR="/run/user/$uid" \
 	-e SYSTEMD_COMPOSE_PROJECT_NAME=ci_junk -e SYSTEMD_COMPOSE_PROFILES=ci_junk \
-	-e SC=/usr/local/bin/systemd-compose "$cid" /usr/local/bin/ci-live
+	-e SC=/usr/local/bin/systemd-compose -e E2E_REPO=/usr/local/src/systemd-compose \
+	"$cid" /usr/local/bin/e2e.test -test.v -test.count=1 -test.timeout=30m ${E2E_RUN:+-test.run "$E2E_RUN"}

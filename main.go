@@ -1,22 +1,16 @@
-// systemd-compose — docker-compose verbs over systemctl, with a
-// project-local systemd-compose.yaml. See cli.go for the verbs.
+// systemd-compose: docker-compose verbs over systemd user units. The
+// command line is internal/cli.
 package main
 
 import (
-	"errors"
-	"fmt"
 	"os"
+
+	"github.com/xflash96/systemd-compose/internal/cli"
 )
 
+// version is set by a release build: -ldflags "-X main.version=v0.1.0".
+var version string
+
 func main() {
-	err := run(os.Args[1:])
-	if err == nil {
-		return
-	}
-	var ee exitError
-	if errors.As(err, &ee) {
-		os.Exit(ee.code)
-	}
-	fmt.Fprintln(os.Stderr, "systemd-compose:", err)
-	os.Exit(1)
+	os.Exit(cli.Main(os.Args[1:], version))
 }

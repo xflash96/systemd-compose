@@ -4,7 +4,7 @@ name: ci
 on:
   push:
     branches: [main]
-    tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*'] # ci/release's regex is the gate
+    tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']
   pull_request:
 
 permissions:
@@ -31,11 +31,11 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: a user manager for the runner's user, through lingering (ci/live waits for it)
+      - name: a user manager for the runner's user, through lingering (the tests wait for it)
         run: |
           sudo loginctl enable-linger "$(id -un)"
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >>"$GITHUB_ENV"
-      - run: ci/live
+      - run: go test -tags e2e -count=1 -v -timeout 30m ./e2e/
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -45,14 +45,20 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # goreleaser reads the tags
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: ci/release "$GITHUB_REF_NAME" dist
-      - name: publish (a -suffix tag as a pre-release)
-        run: |
-          pre=()
-          case $GITHUB_REF_NAME in *-*) pre=(--prerelease) ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --generate-notes "${pre[@]}"
+      - name: the tag's section of CHANGELOG.md, as the release notes
         env:
-          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ runner.temp }}/notes.md
+        run: |
+          awk -v tag="## $GITHUB_REF_NAME" '$0 == tag {f = 1; next} f && /^## / {exit} f' CHANGELOG.md >"$NOTES"
+          grep -q '[^[:space:]]' "$NOTES" || { echo "::error::CHANGELOG.md has no section for $GITHUB_REF_NAME"; exit 1; }
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: "~> v2"
+          args: release --clean --release-notes=${{ runner.temp }}/notes.md
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

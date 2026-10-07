@@ -1,0 +1,804 @@
+.TH SYSTEMD-COMPOSE 1 "" "systemd-compose" "User Commands"
+.nh
+.SH NAME
+systemd-compose \- run a project's services as systemd user units, with docker compose's verbs
+.SH SYNOPSIS
+.B systemd-compose
+.RB [ \-\-system | \-s | \-\-user ]
+.RB [ \-f
+.IR FILE ]
+.RB [ \-p
+.IR NAME ]
+.RB [ \-\-profile
+.IR NAME ]...\&
+.I VERB
+.RI [ ARGS ...]
+.br
+.B systemd-compose help
+.RI [ VERB ]
+.SH DESCRIPTION
+.B systemd-compose
+runs a project's services as systemd user units, with the verbs of docker
+compose and a project-local
+.BR systemd-compose.yaml .
+.PP
+.B Inside a project,
+every verb acts on that project, on the user instance.
+The project is the
+.B systemd-compose.yaml
+in the current directory or the nearest parent, or the file that
+.B \-f
+names.
+.B up
+renders unit files from the yaml, registers them with the user manager and
+starts them.
+.B down
+stops and unregisters them.
+The other verbs act on the project's units alone.
+.PP
+.B Outside a project,
+the verbs act on the user instance through
+.BR systemctl (1)
+and
+.BR journalctl (1).
+.B \-\-system
+acts on the system instance instead, which is the default for root.
+.PP
+It is ordinary systemd underneath:
+.B systemctl \-\-user
+and
+.B journalctl \-\-user
+can inspect or undo anything it does.
+A verb this program does not know passes through to
+.BR systemctl .
+.SS The project name
+Every unit a project renders carries its name:
+.IB PROJECT \- SERVICE .service
+for each service, with its
+.B .socket
+or
+.BR .timer ;
+.IB PROJECT .target ,
+which starts them together; and
+.IB PROJECT .slice ,
+which they run in.
+Two copies of one project can run on one machine under two names.
+The name comes from, in order:
+.IP 1. 4
+.B \-p
+.I NAME
+.IP 2. 4
+.B SYSTEMD_COMPOSE_PROJECT_NAME
+in the environment
+.IP 3. 4
+the same variable in the
+.B .env
+beside the yaml
+.IP 4. 4
+.B name:
+in the yaml
+.IP 5. 4
+the directory's name
+.PP
+A name may not contain a dash.
+A directory named
+.B my-app
+gives the name
+.BR my_app .
+.SS Profiles
+A service with
+.B profiles:
+runs only while one of its profiles is active.
+A profile is activated with
+.B \-\-profile
+.I NAME
+before the verb, which may be repeated, or else with
+.B SYSTEMD_COMPOSE_PROFILES
+(comma-separated) in the environment or the
+.BR .env .
+.B \-\-profile '*'
+activates all of them.
+.B down
+and a bare
+.B stop
+act on every profile.
+A service named on the command line is acted on whatever its profile.
+.SH OPTIONS
+These go before the verb; a verb's own flags go after it.
+.TP
+.BI \-f " FILE" "\fR, \fP\-\-file " FILE
+The project's yaml, instead of looking for
+.B systemd-compose.yaml
+in the current directory and its parents.
+One file: a second
+.B \-f
+is refused.
+.TP
+.BI \-p " NAME" "\fR, \fP\-\-project\-name " NAME
+The project name, before every other source.
+.TP
+.BI \-\-profile " NAME"
+Activate a profile; repeatable;
+.B \(aq*\(aq
+is all of them.
+.TP
+.BR \-s ", " \-\-system
+The system instance.
+Refused inside a project: projects live on the user instance.
+.TP
+.B \-\-user
+The user instance, for root outside a project.
+.TP
+.BR \-h ", " \-\-help
+The help text.
+.TP
+.B \-\-version
+The same as
+.BR version .
+.SH COMMANDS
+.SS Inside a project
+.TP
+.B up \fR[\fB\-\-dry\-run\fR] [\fB\-\-build\fR] [\fB\-\-force\fR] [\fB\-\-force\-recreate\fR|\fB\-\-no\-recreate\fR] [\fB\-\-wait\-timeout\fR \fIT\fR]
+Check every rendered unit with
+.BR "systemd-analyze verify" ,
+then print the plan.
+Run the
+.B build:
+steps whose
+.B creates:
+path is missing.
+Register the units, start the project, and restart the services that
+changed.
+.B up
+exits 1, naming the unit, when one failed to start, keeps restarting, or did
+not start because a service it requires is not up.
+A service counts as started once its program has run 3 seconds.
+One that restarted on the way up is watched for up to 15 seconds.
+.RS
+.TP
+.B \-\-dry\-run
+The plan and any refusal; nothing is built, written, registered or started.
+.TP
+.B \-\-build
+Run every service's build, with
+.B creates:
+or without.
+.TP
+.B \-\-force
+Retire running units the yaml no longer declares (refused without it).
+.TP
+.B \-\-force\-recreate
+Restart every running service, changed or not.
+.TP
+.B \-\-no\-recreate
+Restart none; a changed one stays
+.B changed (not applied)
+for the next
+.BR up .
+.TP
+.BI \-\-wait\-timeout " T"
+Watch a service that restarts on the way up for
+.I T
+instead of 15s (a bare number is seconds; 90s, 2min); one with a
+healthcheck is watched for as long as its healthcheck may take, when that
+is longer.
+.PP
+Neither recreate flag touches an
+.B on_change: start-only
+service, which
+.B up
+never restarts.
+.BR \-d ,
+.B \-\-detach
+and
+.B \-\-wait
+are accepted:
+.B up
+is always detached, and waits for every service.
+.RE
+.TP
+.B down
+Stop and unregister every unit of the project, and stop any
+.B run
+or
+.B build
+still going.
+Units that an older version of the yaml registered from this directory are
+retired too, running or not.
+The rendered files stay in
+.BR .systemd-compose/ .
+.TP
+.B ps
+The project's units and their state, with a
+.B HEALTH
+column for each service with a healthcheck, the next run of each scheduled
+job, and any one-off still running.
+.B \-a
+is accepted.
+.TP
+.B logs \fR[\fB\-f\fR] [\fB\-\-tail\fR \fIN\fR] [\fB\-\-since\fR \fIT\fR] [\fB\-t\fR] [\fB\-\-no\-log\-prefix\fR] [\fB\-\-no\-color\fR] [\fISERVICE\fR...]
+The project's journal, through
+.BR "journalctl \-\-user" .
+For a
+.IR SERVICE ,
+it shows the service's unit with its socket and timer.
+With none, it shows every unit of the project and its slice, with systemd's
+own lines about each.
+.B \-\-tail
+.I N
+is
+.B \-n
+.IR N ,
+and
+.B \-\-tail all
+has no limit.
+.B \-\-since
+and
+.B \-\-until
+take compose's
+.B 10m
+as well as journalctl's times.
+.B \-\-no\-log\-prefix
+is
+.BR "\-o cat" .
+.B \-t
+is accepted; every line carries a timestamp anyway.
+Any other flag is journalctl's
+.RB ( \-f ,
+.BR \-n ,
+.BR \-g ,
+.BR \-p ...).
+It also shows a line printed by a child process that exits at once, which
+.B journalctl \-u
+misses, and it needs no running user manager.
+.TP
+.BR start | stop | restart " \fR[\fISERVICE\fR...]"
+Change the run state only; the units stay registered.
+With no
+.IR SERVICE ,
+they act on every service.
+Each says what started or stopped, including dependents.
+.B start
+and
+.B restart
+clear a named service's failed state first.
+They exit 1 when a service does not come up, or when a name given has
+nothing registered to start.
+.B stop
+exits 1 when a name given is running but is not this project's, and leaves
+it running.
+.TP
+.B kill \fR[\fB\-s\fR \fISIGNAL\fR] \fISERVICE\fR...
+Send a signal to the service's processes: SIGTERM, or the one that
+.B \-s
+.RB ( \-\-signal )
+names, by name or number.
+Compose's kill sends SIGKILL; use
+.B "\-s KILL"
+for that.
+Like
+.BR stop ,
+it exits 1 for a name that runs but is not this project's.
+.TP
+.B build \fR[\fISERVICE\fR...]
+Run every step of the named services'
+.BR build: .
+With no
+.IR SERVICE ,
+run the build of every active service that has one.
+Steps run as transient units in the project's slice, in the service's
+working directory, environment and env files.
+After
+.B build
+.IR SERVICE ,
+.B restart
+.I SERVICE
+runs the new build.
+.TP
+.B run \fR[\fB\-e\fR \fIKEY\fB=\fIVAL\fR] [\fB\-w\fR \fIDIR\fR] [\fB\-T\fR] \fISERVICE\fR [\fICMD\fR...]
+.PD 0
+.TP
+.B exec \fR[\fB\-e\fR \fIKEY\fB=\fIVAL\fR] [\fB\-w\fR \fIDIR\fR] [\fB\-T\fR] \fISERVICE CMD\fR...
+.PD
+Run a one-off command as a transient unit, in the service's working
+directory, environment and env files.
+With no
+.IR CMD ,
+.B run
+runs the service's own command, so
+.B run
+.I JOB
+runs a scheduled job now.
+.B exec
+is
+.B run
+with the command required.
+.B \-e
+.RB ( \-\-env )
+adds a variable, which wins over the service's env files.
+.B \-w
+.RB ( \-\-workdir )
+sets the directory, relative to the service's.
+.B \-T
+.RB ( \-\-no\-TTY )
+runs without a pty; otherwise a terminal gets one.
+Compose's
+.BR \-\-rm ,
+.B \-\-no\-deps
+and
+.B \-i
+are accepted.
+The one-off runs under the service's own
+.BR resources: .
+While the project is registered it runs in the project's slice, and
+otherwise it takes the project's
+.B resources:
+too.
+No other service is started.
+A one-off whose client goes away is stopped with it.
+.TP
+.B config
+The yaml, then every unit as it would be rendered.
+It needs no user manager.
+.TP
+.B top \fR[\fISERVICE\fR] [\fIARGS\fR...]
+.BR systemd-cgtop (1)
+on the project's slice, or on one service's processes.
+.I ARGS
+are cgtop's own
+.RB ( "\-n 1" ).
+.TP
+.B list-timers
+.B systemctl list\-timers
+on the project's scheduled jobs: when each runs next, and last ran.
+.TP
+.I VERB \fR[\fISERVICE\fR...]
+Any other
+.B systemctl
+verb, run as
+.B systemctl \-\-user
+.I VERB
+with each service name mapped to its unit.
+A scheduled job's unit is its timer.
+.BR status ,
+.BR cat ,
+.BR reset\-failed ,
+.B list\-dependencies
+and
+.B clean
+also take the job's own service, and
+.B is\-failed
+takes only that.
+A verb that would act on the whole instance without a unit
+.RB ( status ,
+.BR show ,
+.BR cat ,
+.BR is\-active ...)
+needs a service named.
+A verb that changes units
+.RB ( reset\-failed ,
+.BR freeze ,
+.BR clean ,
+.BR set\-property ,
+.BR reload ...)
+takes only this project's services.
+.BR enable ,
+.BR disable ,
+.BR reenable ,
+.B mask
+and
+.B preset
+are refused, because
+.B up
+and
+.B down
+own the registration.
+.B preset\-all
+and a
+.B cancel
+with no job named are refused too, because they act on the whole instance.
+.SS Anywhere
+.TP
+.B ls
+Every project registered on the user instance: its name, how many of its
+services run (and restart or failed), and its yaml; a project whose
+directory or yaml is gone says so.
+It works inside a project too.
+.TP
+.BR version ", " \-\-version
+This program's version, then systemd's.
+.TP
+.B help \fR[\fIVERB\fR]
+The help text, or one verb's lines.
+.I VERB
+.B \-\-help
+shows them too, for one of this program's verbs.
+.SS Outside a project
+On the user instance (the system instance when run as root, or with
+.BR \-\-system ).
+.TP
+.B ps \fR[\fB\-a\fR] [\fIPATTERN\fR]
+.BR "systemctl list\-units \-\-type=service,timer" ;
+.BR \-a :
+stopped units too.
+.TP
+.B logs \fR[\fB\-f\fR] [\fIUNIT\fR...]
+.BR journalctl ,
+one
+.B \-u
+per
+.IR UNIT ;
+with none, the whole journal.
+It needs no running manager.
+.TP
+.BR start | stop | restart " \fIUNIT\fR..."
+The same words in
+.BR systemctl .
+.TP
+.B up \fIUNIT\fR...
+.BR "systemctl enable \-\-now" :
+register for boot and start.
+.TP
+.B down \fIUNIT\fR...
+.BR "systemctl disable \-\-now" :
+stop and unregister; the unit file stays.
+.TP
+.B config \fIUNIT\fR...
+.BR "systemctl cat" .
+.TP
+.B top
+.B systemd-cgtop
+on the instance's cgroup subtree.
+.TP
+.I VERB ARGS\fR...
+.B systemctl
+.I VERB ARGS
+as given.
+.PP
+.BR build ,
+.B run
+and
+.B exec
+need a project.
+.SH THE PROJECT FILE
+.B systemd-compose.yaml
+has three top-level keys:
+.B name
+(the project name),
+.B resources
+(caps on the whole project, as for a service) and
+.BR services .
+A key starting with
+.B x\-
+is ignored; it holds yaml anchors for merge keys.
+A service takes:
+.TP 16
+.B command
+the program and its arguments
+.RB ( ExecStart= ),
+a string or a list; the program is resolved against
+.B ~/.local/bin
+and
+.B PATH
+when the units are rendered
+.TP
+.B entrypoint
+words put in front of
+.B command
+.TP
+.B working_dir
+.BR WorkingDirectory= ,
+relative to the yaml; default the project directory
+.TP
+.B environment
+.B Environment=
+lines, a map or a list of
+.IB KEY = value
+.TP
+.B env_file
+.B EnvironmentFile=
+files, each a path or
+.RB { path ,
+.BR required }
+.TP
+.B restart
+.BR no ,
+.BR on\-failure ,
+.B always
+or
+.BR unless\-stopped ,
+or
+.RB { policy ,
+.BR delay }
+.TP
+.B depends_on
+a list of services, or a map of
+.RB { condition ,
+.BR required ,
+.BR restart }.
+.B condition
+is
+.B service_started
+(the default),
+.B service_healthy
+or
+.B service_completed_successfully
+.TP
+.B healthcheck
+.RB { test ,
+.BR interval ,
+.BR timeout ,
+.BR start_period }:
+a probe that gates the service's start
+.TP
+.B oneshot
+a job that ends, which dependents can wait for
+.TP
+.B schedule
+a timer that runs the service: an
+.B OnCalendar=
+expression, or
+.RB { calendar ,
+.BR accuracy ,
+.BR persistent ,
+.BR randomized_delay }
+.TP
+.B build
+.RB { run ,
+.BR creates }:
+the steps that make the program
+.TP
+.B resources
+.RB { memory ,
+.BR cpus ,
+.BR pids }
+for the service.
+.B cpus
+needs the cpu controller delegated to your user manager
+.TP
+.B on_change
+.B restart
+(the default) or
+.BR start\-only :
+never restarted by
+.B up
+.TP
+.B listen
+socket activation: the addresses of a
+.B .socket
+unit
+.TP
+.B profiles
+the profiles the service belongs to
+.TP
+.B unit
+raw systemd sections
+.RB ( Unit ,
+.BR Service ,
+.BR Timer ,
+.BR Socket ),
+merged last.
+.BR Environment= ,
+.B EnvironmentFile=
+and
+.B WorkingDirectory=
+are refused: use the keys, which build and run get too
+.PP
+Values may use compose's interpolation
+.RB ( $VAR ,
+.BR ${VAR:\-default} ...),
+except keys and anything under
+.BR unit: ,
+which is systemd's own syntax.
+The variables come from the
+.B .env
+beside the yaml, never from the shell.
+.B $$
+is a literal
+.BR $ .
+.PP
+In
+.BR command ,
+.BR entrypoint ,
+.BR environment ,
+.B healthcheck
+and
+.BR listen ,
+a
+.B %
+starts a systemd specifier
+.RB ( %h ,
+.BR %t ...),
+expanded when the unit runs.
+.B %%
+is a literal
+.BR % .
+.BR working_dir ,
+.BR env_file ,
+.B build: creates:
+and
+.B schedule:
+take no
+.BR % .
+In a service with
+.BR build: ,
+.B environment
+takes no specifier either, because build steps run through
+.BR systemd\-run ,
+which expands none.
+.PP
+.B docs/config.example.yaml
+uses every key, with its rules.
+Also at
+.br
+https://github.com/xflash96/systemd\-compose/blob/main/docs/config.example.yaml
+.SH ENVIRONMENT
+.TP
+.B SYSTEMD_COMPOSE_PROJECT_NAME
+The project name.
+The section
+.B The project name
+above gives its place among the other sources.
+.TP
+.B SYSTEMD_COMPOSE_PROFILES
+The active profiles, comma-separated, when no
+.B \-\-profile
+is given; also read from the
+.BR .env .
+.TP
+.B XDG_RUNTIME_DIR
+How
+.B systemctl \-\-user
+reaches the user manager.
+Outside a login session (cron,
+.BR "su user \-c" ),
+set it to
+.BI /run/user/ UID\fR.
+.TP
+.B PATH
+Where a service's program is found when the units are rendered, after
+.BR ~/.local/bin .
+Nothing else from the shell's environment reaches a service.
+.SH FILES
+.TP
+.B systemd-compose.yaml
+The project, in the current directory or a parent.
+.TP
+.B .env
+Beside the yaml: the variables for interpolation, and
+.B SYSTEMD_COMPOSE_PROJECT_NAME
+and
+.BR SYSTEMD_COMPOSE_PROFILES .
+.TP
+.B .systemd-compose/
+Beside the yaml: the rendered units, which
+.B up
+writes and links; it ignores itself in git.
+.TP
+.B ~/.config/systemd/user/
+The links
+.B up
+makes to the rendered units, and
+.BI default.target.wants/ PROJECT .target\fR,
+which starts the project at boot (with lingering).
+.TP
+.BI ~/.config/systemd/user/ PROJECT \-.service.d/
+Drop-ins for every service of the project;
+.IB PROJECT \- SERVICE .service.d/
+for one, and
+.IB PROJECT \-.timer.d/
+for its timers.
+.BR up 's
+verify step reads them, but a change to one restarts nothing.
+.TP
+.B $XDG_DATA_HOME/systemd-compose/
+Copies of this program, one per build, that the units' healthcheck probes
+run, so moving or replacing the program breaks no probe
+.RB ( ~/.local/share/systemd-compose/
+by default).
+.TP
+.B $XDG_RUNTIME_DIR/systemd-compose/
+The lock that keeps one
+.BR up ,
+.BR down ,
+.BR build ,
+.B start
+or
+.B restart
+of a project at a time, and the files a run keeps while it works: its
+verify copies, a one-off's environment and how it ended, each named with
+its process's pid and swept once that process is gone.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+A verb failed; or
+.BR up ,
+.B start
+or
+.B restart
+found a unit that did not come up, or
+.B stop
+or
+.B kill
+was given a name that runs but is not this project's.
+.PP
+A verb passed through to
+.BR systemctl ,
+.B journalctl
+or
+.B systemd-cgtop
+exits with that program's status, as that program replaces this one.
+A project's own
+.BR stop ,
+.BR start ,
+.B restart
+or
+.B kill
+passes on
+.BR systemctl 's
+status, too, when systemctl itself failed and the report said nothing about
+the unit (5 for a unit systemd no longer has loaded, say).
+.B run
+and
+.B exec
+exit with the command's status, as a shell reports it.
+.B 130
+is a ^C at the command's terminal, a signal to this client, or a closed
+terminal; the command is stopped.
+128 plus the signal's number is a command killed by a signal, which standard
+error names.
+.B 137
+is a command killed at its memory cap, and standard error says it ran out of
+memory.
+.B 255
+is a command stopped before it finished
+.RB ( down ,
+.BR "systemctl stop" ),
+or one that exited 255 itself.
+.SH NOTES
+A project runs on your systemd user instance, which by default stops at your
+last logout and does not start at boot.
+For a project that should keep running, enable lingering once per machine
+.RB ( up
+warns while it is off):
+.PP
+.RS
+.EX
+loginctl enable\-linger
+.EE
+.RE
+.SH EXAMPLES
+In the directory of a project named
+.B demo
+with a service
+.BR api :
+.PP
+.EX
+systemd\-compose up \-\-dry\-run   # the plan; nothing written or started
+systemd\-compose up               # render, verify, build, register, start
+systemd\-compose ps
+systemd\-compose logs \-f api
+systemd\-compose run api npm run migrate
+systemd\-compose status api       # systemctl \-\-user status demo\-api.service
+systemd\-compose \-p demo2 up      # a second copy, named demo2
+systemd\-compose \-p demo2 down    # each copy comes down under its own name
+systemd\-compose down
+.EE
+.SH SEE ALSO
+.BR systemctl (1),
+.BR journalctl (1),
+.BR systemd-run (1),
+.BR systemd-analyze (1),
+.BR systemd-cgtop (1),
+.BR loginctl (1),
+.BR systemd.unit (5),
+.BR systemd.service (5),
+.BR systemd.exec (5),
+.BR systemd.timer (5),
+.BR systemd.socket (5),
+.BR systemd.resource-control (5)
+.PP
+README.md and the guides in docs/, in the source tree and in each release tarball.

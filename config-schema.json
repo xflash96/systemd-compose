@@ -1,0 +1,615 @@
+{
+  "$id": "https://raw.githubusercontent.com/xflash96/systemd-compose/main/config-schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "boolean": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/interpolated"
+        }
+      ]
+    },
+    "envFileMap": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "The file, relative to the yaml.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "required": {
+          "$ref": "#/definitions/boolean",
+          "description": "Whether the file must exist. Default: true."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "interpolated": {
+      "pattern": "\\$\\{?[A-Za-z_]",
+      "type": "string"
+    },
+    "resourcesMap": {
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "cpus": {
+          "anyOf": [
+            {
+              "maximum": 100000,
+              "minimum": 0.001,
+              "type": "number"
+            },
+            {
+              "$ref": "#/definitions/interpolated"
+            }
+          ],
+          "description": "CPUQuota=: a number of CPUs, 0.001 to 100000. Needs the cpu controller delegated to the user manager."
+        },
+        "memory": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "pattern": "^[0-9]*[1-9][0-9]*[KMGT]?$",
+              "type": "string"
+            },
+            {
+              "$ref": "#/definitions/interpolated"
+            }
+          ],
+          "description": "MemoryMax=: bytes, with an optional K, M, G or T."
+        },
+        "pids": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "$ref": "#/definitions/interpolated"
+            }
+          ],
+          "description": "TasksMax=: processes and threads."
+        }
+      },
+      "type": "object"
+    },
+    "restartPolicy": {
+      "enum": [
+        "no",
+        "on-failure",
+        "always",
+        "unless-stopped"
+      ]
+    },
+    "spanForms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "pattern": "^ *(([0-9]+\\.?[0-9]*|\\.[0-9]+)( *(us|usec|ms|msec|s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks)| |$) *)+$",
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/interpolated"
+        }
+      ]
+    },
+    "unitSection": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          {
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        ]
+      },
+      "propertyNames": {
+        "not": {
+          "enum": [
+            "BlockIOAccounting",
+            "BlockIODeviceWeight",
+            "BlockIOReadBandwidth",
+            "BlockIOWeight",
+            "BlockIOWriteBandwidth",
+            "IOAccounting",
+            "IODeviceLatencyTargetSec",
+            "IODeviceWeight",
+            "IOReadBandwidthMax",
+            "IOReadIOPSMax",
+            "IOWeight",
+            "IOWriteBandwidthMax",
+            "IOWriteIOPSMax",
+            "StartupBlockIOWeight",
+            "StartupIOWeight"
+          ]
+        },
+        "pattern": "^[A-Za-z][A-Za-z0-9]*$"
+      },
+      "type": "object"
+    },
+    "words": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      ]
+    }
+  },
+  "description": "A systemd-compose project: services that run as systemd user units. docs/config.example.yaml shows every key.",
+  "patternProperties": {
+    "^x-": {
+      "description": "Ignored: a place for yaml anchors that services merge in with \u003c\u003c:."
+    }
+  },
+  "properties": {
+    "name": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9_]+$",
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/interpolated"
+        }
+      ],
+      "description": "The project's name, the prefix of every unit. Letters, digits and _, no dash. Default: the directory's name. -p NAME and SYSTEMD_COMPOSE_PROJECT_NAME override it."
+    },
+    "resources": {
+      "$ref": "#/definitions/resourcesMap",
+      "description": "A cap on the whole project, on its slice. A change applies in place and restarts nothing."
+    },
+    "services": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "command"
+            ]
+          },
+          {
+            "required": [
+              "entrypoint"
+            ]
+          },
+          {
+            "properties": {
+              "unit": {
+                "properties": {
+                  "Service": {
+                    "required": [
+                      "ExecStart"
+                    ]
+                  }
+                },
+                "required": [
+                  "Service"
+                ]
+              }
+            },
+            "required": [
+              "unit"
+            ]
+          }
+        ],
+        "patternProperties": {
+          "^x-": {
+            "description": "Ignored: a place for yaml anchors that services merge in with \u003c\u003c:."
+          }
+        },
+        "properties": {
+          "build": {
+            "additionalProperties": false,
+            "description": "Steps up runs before it starts the service, not rendered.",
+            "properties": {
+              "creates": {
+                "description": "What the build makes, relative to working_dir. up runs the build when it is missing, and skips a build without creates:.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "run": {
+                "description": "The steps, one command each, with no shell.",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              }
+            },
+            "required": [
+              "run"
+            ],
+            "type": "object"
+          },
+          "command": {
+            "$ref": "#/definitions/words",
+            "description": "The program and its arguments. The program is looked up in ~/.local/bin and PATH when up renders the units."
+          },
+          "depends_on": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "condition": {
+                          "description": "service_started, service_healthy (waits for its healthcheck) or service_completed_successfully (waits for it to exit 0). Default: service_started.",
+                          "enum": [
+                            "service_started",
+                            "service_healthy",
+                            "service_completed_successfully"
+                          ]
+                        },
+                        "required": {
+                          "$ref": "#/definitions/boolean",
+                          "description": "Requires= instead of Wants=. A condition other than service_started makes it true. Default: false."
+                        },
+                        "restart": {
+                          "$ref": "#/definitions/boolean",
+                          "description": "PartOf=: restarting or stopping that service restarts or stops this one."
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ],
+            "description": "Services this one starts after. A list is the default edge to each (After= and Wants=); the map form sets the condition."
+          },
+          "entrypoint": {
+            "$ref": "#/definitions/words",
+            "description": "Words put in front of command:."
+          },
+          "env_file": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "$ref": "#/definitions/envFileMap"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/definitions/envFileMap"
+                    }
+                  ]
+                },
+                "minItems": 1,
+                "type": "array"
+              }
+            ],
+            "description": "Env files systemd reads for the service: one, or a list. A value from a file wins over environment:."
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "propertyNames": {
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "type": "object"
+              },
+              {
+                "items": {
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*=",
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Variables for the service, as a map or a list of KEY=value. Every key needs a value: nothing comes from your shell."
+          },
+          "healthcheck": {
+            "additionalProperties": false,
+            "description": "A readiness probe: the service counts as started once test: passes.",
+            "properties": {
+              "interval": {
+                "$ref": "#/definitions/spanForms",
+                "description": "Whole seconds. Default: 2s."
+              },
+              "start_period": {
+                "$ref": "#/definitions/spanForms",
+                "description": "How long the probe keeps trying. Whole seconds. Default: 60s."
+              },
+              "test": {
+                "description": "The probe's program and its arguments, with no CMD or CMD-SHELL prefix.",
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "timeout": {
+                "$ref": "#/definitions/spanForms",
+                "description": "Whole seconds. Default: 5s."
+              }
+            },
+            "required": [
+              "test"
+            ],
+            "type": "object"
+          },
+          "listen": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ]
+                },
+                "minItems": 1,
+                "type": "array"
+              }
+            ],
+            "description": "Socket activation: a port, IP:port, an absolute path, a relative path with a slash, or @abstract; or a list of them."
+          },
+          "on_change": {
+            "anyOf": [
+              {
+                "enum": [
+                  "restart",
+                  "start-only"
+                ]
+              },
+              {
+                "$ref": "#/definitions/interpolated"
+              }
+            ],
+            "description": "restart: up restarts the service when it changes. start-only: up only starts it when it is down. Default: restart."
+          },
+          "oneshot": {
+            "$ref": "#/definitions/boolean",
+            "description": "Type=oneshot with RemainAfterExit=yes: the service counts as started once it has exited 0."
+          },
+          "profiles": {
+            "description": "The service runs only while one of these profiles is active.",
+            "items": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "resources": {
+            "$ref": "#/definitions/resourcesMap",
+            "description": "This service's caps."
+          },
+          "restart": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/restartPolicy"
+              },
+              {
+                "$ref": "#/definitions/interpolated"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "delay": {
+                    "$ref": "#/definitions/spanForms",
+                    "description": "RestartSec=."
+                  },
+                  "policy": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/definitions/restartPolicy"
+                      },
+                      {
+                        "$ref": "#/definitions/interpolated"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "policy"
+                ],
+                "type": "object"
+              }
+            ],
+            "description": "Restart=; unless-stopped is the same as always. The map form sets the delay too. Default: no."
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "accuracy": {
+                    "$ref": "#/definitions/spanForms",
+                    "description": "AccuracySec=. Default: 10s."
+                  },
+                  "calendar": {
+                    "description": "OnCalendar=, as systemd-analyze calendar takes it.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "persistent": {
+                    "$ref": "#/definitions/boolean",
+                    "description": "Persistent=: a run missed while the machine was off happens at the next boot. Default: true."
+                  },
+                  "randomized_delay": {
+                    "$ref": "#/definitions/spanForms",
+                    "description": "RandomizedDelaySec=."
+                  }
+                },
+                "required": [
+                  "calendar"
+                ],
+                "type": "object"
+              }
+            ],
+            "description": "A timer that starts the service as a oneshot: an OnCalendar= expression, or the map form."
+          },
+          "unit": {
+            "additionalProperties": false,
+            "description": "Raw systemd sections, merged into the unit last. A directive a key above writes is an error.",
+            "properties": {
+              "Service": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    },
+                    {
+                      "items": {
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean"
+                        ]
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  ]
+                },
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "BlockIOAccounting",
+                      "BlockIODeviceWeight",
+                      "BlockIOReadBandwidth",
+                      "BlockIOWeight",
+                      "BlockIOWriteBandwidth",
+                      "Environment",
+                      "EnvironmentFile",
+                      "IOAccounting",
+                      "IODeviceLatencyTargetSec",
+                      "IODeviceWeight",
+                      "IOReadBandwidthMax",
+                      "IOReadIOPSMax",
+                      "IOWeight",
+                      "IOWriteBandwidthMax",
+                      "IOWriteIOPSMax",
+                      "StartupBlockIOWeight",
+                      "StartupIOWeight",
+                      "WorkingDirectory"
+                    ]
+                  },
+                  "pattern": "^[A-Za-z][A-Za-z0-9]*$"
+                },
+                "type": "object"
+              },
+              "Socket": {
+                "$ref": "#/definitions/unitSection",
+                "description": "Only with listen:."
+              },
+              "Timer": {
+                "$ref": "#/definitions/unitSection",
+                "description": "Only with schedule:."
+              },
+              "Unit": {
+                "$ref": "#/definitions/unitSection"
+              }
+            },
+            "type": "object"
+          },
+          "working_dir": {
+            "description": "WorkingDirectory=, relative to the yaml. Default: the yaml's directory. It must exist.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "description": "The services, by name. Each becomes PROJECT-NAME.service.",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]*$"
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "services"
+  ],
+  "title": "systemd-compose.yaml",
+  "type": "object"
+}

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/xflash96/systemd-compose/main/config-schema.json
+#
+# Scheduled jobs in place of a crontab: a nightly archive of notes/, and a
+# daily sweep of archives older than two weeks. README.md says what to try.
+name: backups
+
+services:
+  backup:
+    # A shell line is written [sh, -c, '...']. $$ is a literal $ for the
+    # shell, and %% a literal % for date, since systemd reads % itself.
+    command: [sh, -c, 'mkdir -p archive && tar -czf "archive/notes-$$(date +%%Y-%%m-%%d).tar.gz" notes']
+    schedule:
+      calendar: "*-*-* 02:30:00"
+      # A run missed while the machine was off happens at the next boot.
+      persistent: true
+      randomized_delay: 10min
+
+  prune:
+    # From the project directory, so it finds nothing before the first backup.
+    command: [find, ., -path, "./archive/*.tar.gz", -mtime, "+14", -delete]
+    schedule: daily

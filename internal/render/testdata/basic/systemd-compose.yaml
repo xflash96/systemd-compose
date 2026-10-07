@@ -1,0 +1,60 @@
+name: demo
+resources:
+  memory: 2G
+services:
+  db:
+    command: psql -c "select 1"
+    oneshot: true
+  api:
+    command: node server.mjs --port 8080
+    working_dir: app
+    environment:
+      PORT: "8080"
+      GREETING: hello world
+      QUOTED: say "hi"
+      PCT: "100%%"
+    env_file:
+      - .env
+      - {path: .env.local, required: false}
+    restart: {policy: on-failure, delay: 3s}
+    depends_on:
+      db: {condition: service_completed_successfully, required: true}
+    healthcheck:
+      test: [curl, -sf, http://127.0.0.1:8080/health]
+      interval: 1s
+      timeout: 2s
+      start_period: 30s
+    resources: {memory: 512M, cpus: 0.5, pids: 64}
+    listen: [127.0.0.1:8080, run/api.sock]
+    unit:
+      Unit:
+        Description: the api, described by hand
+        After: network-online.target
+      Service:
+        TimeoutStopSec: "10"
+      Socket:
+        Backlog: "64"
+  worker:
+    command: node worker.mjs
+    environment:
+      - MODE=batch
+    depends_on:
+      api: {condition: service_healthy}
+    on_change: start-only               # so no depends_on restart: true here
+    restart: always
+  cache:
+    command: node cache.mjs
+    depends_on:
+      db: {}                            # the default edge: After= + Wants=
+      api: {restart: true}              # PartOf=: restarted with api
+      worker: {required: true}          # Requires=, with no condition
+  backup:
+    command: backup --all
+    schedule:
+      calendar: "*-*-* 03:00:00"
+      randomized_delay: 5min
+    unit:
+      Service:
+        SuccessExitStatus: "2"
+      Timer:
+        OnBootSec: 1min

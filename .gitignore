@@ -1,4 +1,5 @@
 # the built binary, if built in place
 /systemd-compose
-# release files from ci/release
+# what goreleaser writes, and the licences it ships
 /dist/
+/third_party/

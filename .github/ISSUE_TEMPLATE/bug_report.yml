@@ -1,0 +1,49 @@
+name: Bug report
+description: Something systemd-compose does wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran, and what it printed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: version
+    attributes:
+      label: systemd-compose --version
+      description: Its two lines name this program's version and systemd's.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution
+      placeholder: Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: yaml
+    attributes:
+      label: systemd-compose.yaml
+      description: The smallest file that shows the problem, with secrets removed.
+      render: yaml
+  - type: textarea
+    id: ps
+    attributes:
+      label: systemd-compose ps
+      render: text
+  - type: textarea
+    id: journal
+    attributes:
+      label: The journal
+      description: systemd-compose logs --no-pager -n 50 SERVICE, for the service involved.
+      render: text

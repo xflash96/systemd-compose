@@ -1,0 +1,56 @@
+# The release archives: for linux amd64 and arm64, a tarball holding the
+# static binary, LICENSE, README.md, CHANGELOG.md, docs/, config-schema.json
+# and, under third_party/, the licences of Go and of every module compiled
+# in; and SHA256SUMS. The release workflow (.github/workflows/release.yml)
+# runs it on a pushed tag, with that tag's CHANGELOG.md section as notes.
+#
+#   goreleaser release --snapshot --clean    # the same files, into dist/
+version: 2
+
+project_name: systemd-compose
+
+before:
+  hooks:
+    - go mod download
+    - scripts/third-party.sh
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version=v{{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    hooks:
+      post:
+        - cmd: scripts/check-build.sh "{{ .Path }}" "v{{ .Version }}" "{{ .Arch }}"
+
+archives:
+  - formats: [tar.gz]
+    # README's install lines name this directory
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    wrap_in_directory: true
+    # file times are the commit's, and owners and modes fixed, so the
+    # archives are the same wherever they are built
+    builds_info: {owner: root, group: root, mode: 0755, mtime: "{{ .CommitDate }}"}
+    files:
+      - {src: LICENSE, info: &file {owner: root, group: root, mode: 0644, mtime: "{{ .CommitDate }}"}}
+      - {src: README.md, info: *file}
+      - {src: CHANGELOG.md, info: *file}
+      - {src: config-schema.json, info: *file}
+      - {src: docs/*, info: *file}
+      - {src: third_party/**/*, info: *file}
+
+checksum:
+  name_template: SHA256SUMS
+  algorithm: sha256
+
+release:
+  # a v0.1.0-rc.1 tag publishes a pre-release
+  prerelease: auto
+
+changelog:
+  # the notes are CHANGELOG.md's, written by hand
+  disable: true
