@@ -167,8 +167,12 @@ func Load(path, nameFlag string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	override, from := nameOverride(nameFlag, filepath.Dir(abs))
-	p, err := parse(data, abs, override, from)
+	vars, err := readDotenv(filepath.Join(filepath.Dir(abs), ".env"))
+	if err != nil {
+		return nil, err
+	}
+	override, from := nameOverride(nameFlag, vars)
+	p, err := parse(data, abs, override, from, vars)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", filepath.Base(abs), err)
 	}
@@ -176,52 +180,29 @@ func Load(path, nameFlag string) (*Project, error) {
 }
 
 // nameOverride resolves the project name sources that live outside the yaml.
-func nameOverride(flag, dir string) (name, from string) {
+func nameOverride(flag string, dotenv map[string]string) (name, from string) {
 	if flag != "" {
 		return flag, "-p"
 	}
 	if v := os.Getenv(ProjectNameVar); v != "" {
 		return v, "environment"
 	}
-	if v := dotenvValue(filepath.Join(dir, ".env"), ProjectNameVar); v != "" {
+	if v := dotenv[ProjectNameVar]; v != "" {
 		return v, ".env"
 	}
 	return "", ""
 }
 
-// dotenvValue reads one KEY=value from a .env file: comments and blank
-// lines skipped, optional surrounding quotes stripped, last one wins.
-func dotenvValue(path, key string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	val := ""
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok || strings.TrimSpace(k) != key {
-			continue
-		}
-		v = strings.TrimSpace(v)
-		if len(v) >= 2 && (v[0] == '"' && v[len(v)-1] == '"' || v[0] == '\'' && v[len(v)-1] == '\'') {
-			v = v[1 : len(v)-1]
-		}
-		val = v
-	}
-	return val
-}
-
-func parse(data []byte, abs string, override, from string) (*Project, error) {
+func parse(data []byte, abs string, override, from string, vars map[string]string) (*Project, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, err
 	}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
 		return nil, fmt.Errorf("empty file")
+	}
+	if err := interpolateTree(&doc, vars); err != nil {
+		return nil, err
 	}
 	root := doc.Content[0]
 	top, err := mapping(root, "top level")
@@ -314,9 +295,41 @@ func projectName(s, where string) error {
 // would expand a % specifier in it.
 func literalPath(s, key, ctx string, line int) error {
 	if strings.Contains(s, "%") {
-		return fmt.Errorf("line %d: %s: %s: %% is a systemd specifier; literal paths only", line, ctx, key)
+		return fmt.Errorf("line %d: %s: %s: no %% here: the tool reads this path itself (to check it, hash it or build in it), so it must be literal", line, ctx, key)
 	}
 	return nil
+}
+
+// specifiers is the one rule for % in a value systemd expands: a specifier
+// of the 248 floor passes through for systemd to expand, %% is a literal
+// percent, and anything else is refused here, because systemd drops an
+// Environment= or ListenStream= line with a bad specifier and says so only
+// in its log; systemd-analyze verify says nothing.
+func specifiers(s string) error {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '%' {
+			continue
+		}
+		if i+1 == len(s) {
+			return fmt.Errorf("%q ends in a %% that starts no specifier; write %%%% for a literal percent", s)
+		}
+		i++
+		switch c := s[i]; {
+		case c == '%' || strings.IndexByte("aAbBCEfgGhHiIjJlLmMnNopPsStTuUvVwW", c) >= 0:
+		case strings.IndexByte("dqyY", c) >= 0:
+			return fmt.Errorf("%%%c in %q needs systemd 251; this tool supports 248 and later", c, s)
+		case strings.IndexByte("crR", c) >= 0:
+			return fmt.Errorf("%%%c in %q is a deprecated systemd specifier", c, s)
+		default:
+			return fmt.Errorf("%%%c in %q is not a systemd specifier; write %%%% for a literal percent", c, s)
+		}
+	}
+	return nil
+}
+
+// usesSpecifier reports a % that is not the literal %%.
+func usesSpecifier(s string) bool {
+	return strings.Contains(strings.ReplaceAll(s, "%%", ""), "%")
 }
 
 // Service finds a service by name; nil when there is none.
@@ -474,6 +487,13 @@ func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 	if svc.Schedule != nil && svc.Restart != nil && svc.Restart.Policy == "always" {
 		return nil, fmt.Errorf("line %d: %s: schedule: with restart: always would restart a finished job forever; drop one", node.Line, ctx)
 	}
+	if svc.Build != nil {
+		for _, kv := range svc.Environment {
+			if usesSpecifier(kv.Value) {
+				return nil, fmt.Errorf("line %d: %s: build: runs in the service's environment through systemd-run, which does not expand specifiers, and environment: %s uses one", node.Line, ctx, kv.Key)
+			}
+		}
+	}
 	if svc.Schedule != nil && svc.Healthcheck != nil {
 		return nil, fmt.Errorf("line %d: %s: healthcheck: on a scheduled job has nothing to gate; drop one", node.Line, ctx)
 	}
@@ -510,6 +530,9 @@ func parseListen(n *yaml.Node, ctx, dir string) ([]string, error) {
 		if a == "" {
 			return nil, fmt.Errorf("line %d: %s: listen: empty address", item.Line, ctx)
 		}
+		if err := specifiers(a); err != nil {
+			return nil, fmt.Errorf("line %d: %s: listen: %v", item.Line, ctx, err)
+		}
 		if strings.Contains(a, "/") && !strings.HasPrefix(a, "/") && !strings.HasPrefix(a, "%") && !strings.HasPrefix(a, "@") {
 			a = filepath.Join(dir, a)
 		}
@@ -537,8 +560,8 @@ func refuseCommand(cmd, ctx string, line int) error {
 			return fmt.Errorf("line %d: %s: a bare ; separates ExecStart commands in systemd; one command per service, or use unit: Service: ExecStart:", line, ctx)
 		}
 	}
-	if strings.ContainsAny(cmd, "%$") {
-		return fmt.Errorf("line %d: %s: %% and $ are systemd specifiers and expansions; literal values only here, or use unit: Service: ExecStart: for the raw form", line, ctx)
+	if err := specifiers(cmd); err != nil {
+		return fmt.Errorf("line %d: %s: %v", line, ctx, err)
 	}
 	return nil
 }
@@ -572,6 +595,9 @@ func parseEnvironment(n *yaml.Node, ctx string) ([]KV, error) {
 		}
 		if strings.ContainsAny(v, "\n\r") {
 			return fmt.Errorf("line %d: %s: environment: %s contains a newline", line, ctx, k)
+		}
+		if err := specifiers(v); err != nil {
+			return fmt.Errorf("line %d: %s: environment: %s: %v", line, ctx, k, err)
 		}
 		out = append(out, KV{k, v})
 		return nil
@@ -806,6 +832,9 @@ func parseSchedule(n *yaml.Node, ctx string) (*Schedule, error) {
 	if strings.TrimSpace(s.Calendar) == "" {
 		return nil, fmt.Errorf("line %d: %s: schedule: calendar is empty", n.Line, ctx)
 	}
+	if err := specifiers(s.Calendar); err != nil {
+		return nil, fmt.Errorf("line %d: %s: schedule: %v", n.Line, ctx, err)
+	}
 	return s, nil
 }
 
@@ -865,6 +894,9 @@ func parseBuild(n *yaml.Node, ctx string) (*Build, error) {
 		}
 		if err := refuseCommand(s, ctx+": build: run", item.Line); err != nil {
 			return nil, err
+		}
+		if strings.Contains(s, "%") {
+			return nil, fmt.Errorf("line %d: %s: build: run: no %% here: build steps run through systemd-run, which does not expand specifiers", item.Line, ctx)
 		}
 		b.Run = append(b.Run, s)
 	}

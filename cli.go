@@ -919,7 +919,9 @@ func (pr *project) runBuild(s *Service) error {
 			"--description=" + pr.p.Name + ": build " + s.Name,
 			"-p", "WorkingDirectory=" + s.WorkingDir, "-p", "Slice=" + pr.p.SliceName()}
 		for _, kv := range s.Environment {
-			args = append(args, "-p", "Environment="+envAssignment(kv))
+			// systemd-run -p is literal: no specifiers (refused at load), and
+			// %% would arrive as two percent signs.
+			args = append(args, "-p", "Environment="+envAssignment(KV{kv.Key, strings.ReplaceAll(kv.Value, "%%", "%")}))
 		}
 		for _, ef := range s.EnvFiles {
 			p := ef.Path
@@ -929,7 +931,9 @@ func (pr *project) runBuild(s *Service) error {
 			args = append(args, "-p", "EnvironmentFile="+p)
 		}
 		args = append(args, "--")
-		args = append(args, splitWords(cmd)...)
+		for _, w := range splitWords(cmd) {
+			args = append(args, execLiteral(w)) // the manager expands $VAR in a transient ExecStart too
+		}
 		c := exec.Command("systemd-run", args...)
 		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if err := c.Run(); err != nil {

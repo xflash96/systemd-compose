@@ -230,7 +230,7 @@ func renderService(p *Project, s *Service, opt RenderOptions) (svc Rendered, tim
 		if err != nil {
 			return Rendered{}, nil, nil, fmt.Errorf("command: %w", err)
 		}
-		u.own("Service", "ExecStart", cmd, "command")
+		u.own("Service", "ExecStart", execLiteral(cmd), "command")
 	}
 	if h := s.Healthcheck; h != nil {
 		test, err := resolveArgv(h.Test, s.WorkingDir, opt.SearchPath)
@@ -242,7 +242,7 @@ func renderService(p *Project, s *Service, opt RenderOptions) (svc Rendered, tim
 		}
 		words := []string{opt.Exe, "probe", "--interval", h.Interval, "--timeout", h.Timeout, "--start-period", h.StartPeriod, "--"}
 		words = append(words, test...)
-		u.add("Service", "ExecStartPost", joinWords(words))
+		u.add("Service", "ExecStartPost", execLiteral(joinWords(words)))
 		sp, err := seconds(h.StartPeriod)
 		if err != nil {
 			return Rendered{}, nil, nil, err
@@ -355,11 +355,10 @@ func marker(u *unitFile, p *Project, service string) {
 	u.own(MarkerSection, "Config", p.ConfigPath, "")
 }
 
-// envAssignment spells KEY=value for Environment=, which systemd
-// specifier-expands: a literal % is written %% so the value the yaml
-// declares is the value the process sees.
+// envAssignment spells KEY=value for Environment=. The value's % are
+// systemd's (checked by specifiers at load), and $ is literal there.
 func envAssignment(kv KV) string {
-	return quoteWord(kv.Key + "=" + strings.ReplaceAll(kv.Value, "%", "%%"))
+	return quoteWord(kv.Key + "=" + kv.Value)
 }
 
 // envFileHash makes an edit to an env_file visible as a text change in the
@@ -420,6 +419,11 @@ func resolveWord(word, workDir string, search []string) (string, error) {
 	if strings.ContainsAny(word, " \t\"'\\") {
 		return "", fmt.Errorf("%q: a program path with whitespace or quotes needs systemd quoting, which is refused here; use unit: Service: ExecStart:", word)
 	}
+	if strings.Contains(word, "%") {
+		// systemd expands it at load; systemd-analyze verify --user, which
+		// up runs on the render, refuses a path that does not exist then.
+		return word, nil
+	}
 	if strings.Contains(word, "/") {
 		p := word
 		if !filepath.IsAbs(p) {
@@ -467,6 +471,11 @@ func quoteWord(w string) string {
 	b.WriteByte('"')
 	return b.String()
 }
+
+// execLiteral writes the $ that interpolation left (from $$) so systemd
+// keeps it: an Exec line expands $VAR from the unit's environment at run
+// time, and $$ is its literal dollar. Environment= needs no such care.
+func execLiteral(s string) string { return strings.ReplaceAll(s, "$", "$$") }
 
 func joinWords(words []string) string {
 	q := make([]string, len(words))

@@ -12,7 +12,7 @@ services:
       PORT: "8080"
       GREETING: hello world
       QUOTED: say "hi"
-      PCT: "100%"
+      PCT: "100%%"
     env_file:
       - .env
       - {path: .env.local, required: false}

@@ -93,11 +93,26 @@ Names in `depends_on` are services in this file. Everything is rendered to
 `<project>.slice`; the target is what boots, the slice is what `logs` and
 `top` scope to.
 
+Any value (never a key, and nothing under `unit:`, which is systemd's own
+syntax) may use compose's interpolation: `$VAR`, `${VAR}`, `${VAR:-default}`,
+`${VAR-default}`, `${VAR:?error}`, `${VAR?error}`, `${VAR:+other}`,
+`${VAR+other}`, nested. The variables come from the `.env` beside the yaml.
+`$$` is a literal `$` and reaches the program as one, so `command: sh -c
+'echo $$HOME'` leaves `$HOME` to the shell.
+
+`%` is systemd's: in `command`, `healthcheck`, `environment`, `listen` and
+`schedule`, `%h`, `%t`, `%U` and the rest of systemd's specifiers (as of
+systemd 248) are left for the manager to expand, so `environment:
+{SOCK: "%t/app.sock"}` works on any machine; `%%` is a literal percent. Anything else
+after a `%` is refused at load, since systemd would drop the whole line with
+only a log message. `working_dir`, `env_file` and `build` take no `%`: the
+tool reads those paths itself.
+
 | key | renders to |
 |---|---|
-| `command` | `ExecStart=`, systemd's own parsing; the first word is resolved to an absolute path at render time, against `~/.local/bin` and your `PATH`, and refused if not found; nothing else from your shell reaches the service. For a shell, a specifier or a path with a space, omit it and write `unit: Service: ExecStart:` yourself |
+| `command` | `ExecStart=`, systemd's own parsing; the first word is resolved to an absolute path at render time, against `~/.local/bin` and your `PATH`, and refused if not found; nothing else from your shell reaches the service. A program given through a specifier (`%h/bin/tool`) is left to systemd, and the verify gate refuses it if it does not exist. For a shell or a program path with a space, omit it and write `unit: Service: ExecStart:` yourself |
 | `working_dir` | `WorkingDirectory=`, default the project directory |
-| `environment` | `Environment=` lines, literal: a `%` is escaped so systemd does not expand it; a bare `KEY` is refused, nothing is captured from your shell |
+| `environment` | `Environment=` lines; `$` is literal, `%` a specifier (above); a bare `KEY` is refused, nothing is captured from your shell |
 | `env_file` | `EnvironmentFile=`; a change to the file is a change to the unit |
 | `restart` | `Restart=`, `RestartSec=` |
 | `depends_on` | `After=` + `Wants=`; `required: true` → `Requires=`; `restart: true` → `PartOf=`. `condition: service_healthy` and `service_completed_successfully` always render `Requires=`, since a `Wants=` dependent would start even when the dependency fails |
@@ -168,9 +183,12 @@ sc restart api db  # name them: a bare restart would also restart start-only ser
 ## Where it differs from compose, on purpose
 
 - No `ports:` and no `networks:`: a host process binds what it binds.
-- No `${VAR}` interpolation and no shell in `command:`: what you write is what
-  systemd runs. `$`, `%` and a bare `;` are refused; the raw form is available
-  through `unit: Service: ExecStart:`.
+- `${VAR}` interpolation reads the `.env` beside the yaml and never your
+  shell's environment, so a unit does not depend on which shell ran `up`. A
+  variable that is not set and has no default (`${VAR:-default}`) is an
+  error, not compose's empty string.
+- No shell in `command:`: what you write is what systemd runs. A bare `;` is
+  refused; the raw form is available through `unit: Service: ExecStart:`.
 - `healthcheck` is readiness only. Liveness with a restart is a `schedule:`
   service of your own, because it needs judgment a generic probe lacks.
 - `depends_on` defaults to `Wants=`. `required: true`, and the health and

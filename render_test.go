@@ -150,7 +150,7 @@ func TestRawFormAndConcat(t *testing.T) {
 	bin := fakeBin(t, "node")
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigFileName)
-	y := "services:\n  a:\n    environment: {PORT: \"8080\", PCT: \"100%\"}\n    unit: {Service: {ExecStart: /bin/sh -c \"echo $HOME\", Environment: EXTRA=1}}\n"
+	y := "services:\n  a:\n    environment: {PORT: \"8080\", PCT: \"100%%\"}\n    unit: {Service: {ExecStart: /bin/sh -c \"echo $HOME\", Environment: EXTRA=1}}\n"
 	if err := os.WriteFile(path, []byte(y), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -240,6 +240,27 @@ func TestSeconds(t *testing.T) {
 	for _, bad := range []string{"soon", "", "5 s x", "h", "1.2.3s"} {
 		if _, err := seconds(bad); err == nil {
 			t.Errorf("seconds(%q) should fail", bad)
+		}
+	}
+}
+
+// Specifiers pass through for systemd: a %-led program word is not
+// resolved here (verify --user checks it), and environment and listen keep
+// theirs.
+func TestSpecifiersRender(t *testing.T) {
+	p, err := loadYAML(t, `name: sp
+services: {a: {command: "%h/bin/tool --sock %t/x.sock", environment: {RT: "%t/rt", PCT: "5%%"}, listen: "%t/a.sock"}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	units, err := Render(p, RenderOptions{Exe: "/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := units[1].Text + units[2].Text
+	for _, want := range []string{"ExecStart=%h/bin/tool --sock %t/x.sock\n", "Environment=RT=%t/rt\n", "Environment=PCT=5%%\n", "ListenStream=%t/a.sock\n"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in\n%s", want, all)
 		}
 	}
 }
