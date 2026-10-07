@@ -86,20 +86,27 @@ func (p *Project) UnitsOf(s *Service) []string {
 	return []string{p.UnitOf(s)}
 }
 
-// UnitNames lists every unit this project renders, in render order: exactly
-// the names Render emits. up and down take it as the declared set, so a
-// unit rendered but missing here would be linked and retired in one up.
-func (p *Project) UnitNames() []string {
+// UnitNames lists every unit this run renders, in render order: exactly
+// the names Render emits, the enabled services' and nothing of a profile
+// that is not active.
+func (p *Project) UnitNames() []string { return p.unitNames(p.EnabledServices()) }
+
+// DeclaredNames lists the units of every service in the file, whatever the
+// profiles: what the project owns. down, ps and the orphan sweep take it,
+// so a service of an inactive profile is never mistaken for an orphan.
+func (p *Project) DeclaredNames() []string { return p.unitNames(p.Services) }
+
+func (p *Project) unitNames(services []*Service) []string {
 	names := []string{p.SliceName()}
-	for _, s := range p.Services {
+	for _, s := range services {
 		names = append(names, p.ServiceUnit(s))
 	}
-	for _, s := range p.Services {
+	for _, s := range services {
 		if s.Schedule != nil {
 			names = append(names, p.TimerUnit(s))
 		}
 	}
-	for _, s := range p.Services {
+	for _, s := range services {
 		if len(s.Listen) > 0 {
 			names = append(names, p.SocketUnit(s))
 		}
@@ -115,7 +122,7 @@ func Render(p *Project, opt RenderOptions) ([]Rendered, error) {
 	}
 	out := []Rendered{sl}
 	var timers, sockets []Rendered
-	for _, s := range p.Services {
+	for _, s := range p.EnabledServices() {
 		svc, tmr, sock, err := renderService(p, s, opt)
 		if err != nil {
 			return nil, fmt.Errorf("service %s: %w", s.Name, err)
@@ -161,7 +168,7 @@ func renderTarget(p *Project) (Rendered, error) {
 	u := newUnit()
 	u.setDefault("Unit", "Description", p.Name+" (systemd-compose project)")
 	u.own("Unit", "SourcePath", p.ConfigPath, "")
-	for _, s := range p.Services {
+	for _, s := range p.EnabledServices() { // the boot set: no inactive profile
 		for _, n := range p.UnitsOf(s) { // for a scheduled job: the timer, never the job
 			u.add("Unit", "Wants", n)
 		}

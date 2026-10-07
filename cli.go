@@ -21,7 +21,7 @@ import (
 
 const help = `systemd-compose — docker-compose verbs over systemd.
 
-  systemd-compose [--system|-s] [-p NAME] VERB [ARGS...]
+  systemd-compose [--system|-s] [-p NAME] [--profile NAME]... VERB [ARGS...]
 
 INSIDE A PROJECT (a systemd-compose.yaml here or in any parent directory, as
 compose finds its file) every verb is scoped to it, on the user instance;
@@ -29,6 +29,9 @@ compose finds its file) every verb is scoped to it, on the user instance;
 target and the slice carry it. It comes from, in order: -p NAME, the
 SYSTEMD_COMPOSE_PROJECT_NAME variable in the environment, the same variable
 in a .env beside the yaml, name: in the yaml, the directory's name.
+A service with profiles: runs only when one of them is active: --profile
+NAME (repeatable), else SYSTEMD_COMPOSE_PROFILES (comma list) from the
+environment or the .env; * is all. down and stop take every profile.
 
   up [--build] [--force] [--force-recreate|--no-recreate]
                            render, verify, register and start the project;
@@ -60,7 +63,8 @@ when run as root); --system or -s for the system instance explicitly.
 
 type flags struct {
 	user, system bool
-	name         string // -p
+	name         string   // -p
+	profiles     []string // --profile, repeatable
 }
 
 func run(args []string) error {
@@ -77,9 +81,20 @@ func run(args []string) error {
 			}
 			f.name = args[1]
 			args = args[1:]
+		case "--profile":
+			if len(args) < 2 {
+				return fmt.Errorf("--profile needs a name")
+			}
+			f.profiles = append(f.profiles, args[1])
+			args = args[1:]
 		default:
 			if v, ok := strings.CutPrefix(args[0], "--project-name="); ok {
 				f.name = v
+				args = args[1:]
+				continue
+			}
+			if v, ok := strings.CutPrefix(args[0], "--profile="); ok {
+				f.profiles = append(f.profiles, v)
 				args = args[1:]
 				continue
 			}
@@ -103,10 +118,10 @@ parsed:
 		if f.system {
 			return fmt.Errorf("--system is refused inside a project (%s): projects live on the user instance, which cannot link files under /home into /etc", cfg)
 		}
-		return projectMode(cfg, verb, args, f.name)
+		return projectMode(cfg, verb, args, f)
 	}
-	if f.name != "" {
-		return fmt.Errorf("-p names a project, and there is no systemd-compose.yaml here or above")
+	if f.name != "" || len(f.profiles) > 0 {
+		return fmt.Errorf("-p and --profile belong to a project, and there is no systemd-compose.yaml here or above")
 	}
 	// User instance by default, system as root; either flag is explicit.
 	m := &Manager{User: !f.system && (f.user || os.Getuid() != 0)}
@@ -123,8 +138,8 @@ type project struct {
 	opt       RenderOptions
 }
 
-func projectMode(cfg, verb string, args []string, nameFlag string) error {
-	p, err := Load(cfg, nameFlag)
+func projectMode(cfg, verb string, args []string, f flags) error {
+	p, err := Load(cfg, Options{Name: f.name, Profiles: f.profiles})
 	if err != nil {
 		return err
 	}
@@ -188,17 +203,27 @@ func projectMode(cfg, verb string, args []string, nameFlag string) error {
 }
 
 func (pr *project) scopeLine() {
-	fmt.Printf("project %s (%s, name from %s): %d units, from %s\n", pr.p.Name, pr.m.ScopeName(), pr.p.NameFrom, len(pr.p.UnitNames()), pr.p.ConfigPath)
+	profiles := ""
+	if len(pr.p.Profiles) > 0 {
+		profiles = fmt.Sprintf(", profiles %s from %s", strings.Join(pr.p.Profiles, ","), pr.p.ProfilesFrom)
+	}
+	fmt.Printf("project %s (%s, name from %s%s): %d units, from %s\n", pr.p.Name, pr.m.ScopeName(), pr.p.NameFrom, profiles, len(pr.p.UnitNames()), pr.p.ConfigPath)
 }
 
-// unitsFor maps service names to the units start, stop or restart acts on;
-// no names means every service. restart takes the one unit that stands for
-// a service (a listening service keeps its socket open across it); start
-// and stop take every unit the service brings up.
+// unitsFor maps service names to the units start, stop or restart acts on.
+// No names means the enabled services for start and restart, and every
+// service for stop, whatever its profile: stopping the project stops what
+// runs. A named service is acted on whatever its profile, as compose
+// enables a service named on the command line. restart takes the one unit
+// that stands for a service (a listening service keeps its socket open
+// across it); start and stop take every unit the service brings up.
 func (pr *project) unitsFor(verb string, args []string) ([]string, error) {
 	var services []*Service
 	if len(args) == 0 {
-		services = pr.p.Services
+		services = pr.p.EnabledServices()
+		if verb == "stop" {
+			services = pr.p.Services
+		}
 	}
 	for _, a := range args {
 		s, err := pr.p.Lookup(a)
@@ -253,7 +278,7 @@ func (pr *project) ps() error {
 }
 
 func (pr *project) table() error {
-	names := pr.p.UnitNames()
+	names := pr.p.DeclaredNames()
 	states, err := pr.m.States(names)
 	if err != nil {
 		return err
@@ -272,17 +297,21 @@ func (pr *project) table() error {
 			continue
 		}
 		if !s.Known() {
-			fmt.Fprintf(w, "%s\tnot-found\t-\t-\tnot registered (up registers it)\n", n)
+			fmt.Fprintf(w, "%s\tnot-found\t-\t-\t%s\n", n, pr.notRegistered(n))
 			continue
+		}
+		inactive := ""
+		if svc := pr.serviceByUnit(n); svc != nil && !pr.p.Enabled(svc) {
+			inactive = " (profile " + strings.Join(svc.Profiles, "|") + " not active)"
 		}
 		reg := s.UnitFileState
 		switch {
 		case r.kind == "none":
-			reg = "not registered (up registers it)" // a slice systemd made on demand is loaded anyway
+			reg = pr.notRegistered(n) // a slice systemd made on demand is loaded anyway
 		case reg == "":
 			reg = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", n, s.LoadState, s.ActiveState, s.SubState, reg)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s%s\n", n, s.LoadState, s.ActiveState, s.SubState, reg, inactive)
 	}
 	return w.Flush()
 }
@@ -495,12 +524,24 @@ func (pr *project) up(args []string) error {
 		}
 		rows = append(rows, row)
 	}
-	orphans, err := pr.orphans(unitDir, names)
+	orphans, err := pr.orphans(unitDir, pr.p.DeclaredNames())
 	if err != nil {
 		return err
 	}
+	// A service of an inactive profile is neither rendered nor touched: one
+	// an earlier up registered keeps running, outside the boot set.
+	enabled := map[string]bool{}
+	for _, n := range names {
+		enabled[n] = true
+	}
+	var idle []string
+	for _, n := range pr.p.DeclaredNames() {
+		if !enabled[n] && pr.registrationOf(unitDir, n).kind == "ours" {
+			idle = append(idle, n)
+		}
+	}
 	var builds []*Service
-	for _, s := range pr.p.Services {
+	for _, s := range pr.p.EnabledServices() {
 		if s.Build == nil {
 			continue
 		}
@@ -522,6 +563,9 @@ func (pr *project) up(args []string) error {
 			act = strings.Join(r.actions, ", ")
 		}
 		fmt.Printf("  %-32s %-22s %s\n", r.unit, r.change, act)
+	}
+	for _, n := range idle {
+		fmt.Printf("  %-32s %-22s %s\n", n, "profile not active", "left as is, out of the boot set")
 	}
 	var shed, gone []orphan
 	for _, o := range orphans {
@@ -583,7 +627,7 @@ func (pr *project) up(args []string) error {
 		}
 	}
 	var startable []string
-	for _, s := range pr.p.Services {
+	for _, s := range pr.p.EnabledServices() {
 		startable = append(startable, pr.p.UnitsOf(s)...)
 	}
 	// Both, whatever the first says: a unit that fails to start must not
@@ -675,12 +719,20 @@ func (pr *project) ownedUnits(names []string) (ours []string, others map[string]
 		case "ours":
 			ours = append(ours, n)
 		case "none":
-			others[n] = "not registered (up registers it)"
+			others[n] = pr.notRegistered(n)
 		default:
 			others[n] = "NOT OURS: " + r.owner
 		}
 	}
 	return ours, others, nil
+}
+
+// notRegistered says why a unit has no registration and what would make one.
+func (pr *project) notRegistered(unit string) string {
+	if svc := pr.serviceByUnit(unit); svc != nil && !pr.p.Enabled(svc) {
+		return "not registered (its profile " + strings.Join(svc.Profiles, "|") + " is not active)"
+	}
+	return "not registered (up registers it)"
 }
 
 func markerValue(text, key string) string {
@@ -834,7 +886,7 @@ func (pr *project) down(args []string) error {
 	if err != nil {
 		return err
 	}
-	names := pr.p.UnitNames()
+	names := pr.p.DeclaredNames() // every profile: down leaves nothing of the project registered
 	registered, others, err := pr.ownedUnits(names)
 	if err != nil {
 		return err
@@ -875,13 +927,13 @@ func (pr *project) build(args []string) error {
 	pr.scopeLine()
 	var todo []*Service
 	if len(args) == 0 {
-		for _, s := range pr.p.Services {
+		for _, s := range pr.p.EnabledServices() {
 			if s.Build != nil {
 				todo = append(todo, s)
 			}
 		}
 		if len(todo) == 0 {
-			return fmt.Errorf("no service in project %s declares build:", pr.p.Name)
+			return fmt.Errorf("no enabled service in project %s declares build:", pr.p.Name)
 		}
 	}
 	for _, a := range args {

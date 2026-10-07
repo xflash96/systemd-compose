@@ -21,9 +21,10 @@ func fakeBin(t *testing.T, names ...string) string {
 
 func TestRenderGolden(t *testing.T) {
 	t.Setenv(ProjectNameVar, "")
+	t.Setenv(ProfilesVar, "")
 	bin := fakeBin(t, "node", "curl", "psql", "backup")
 	yamlPath, _ := filepath.Abs("testdata/basic/systemd-compose.yaml")
-	p, err := Load(yamlPath, "")
+	p, err := Load(yamlPath, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +133,7 @@ services:
 			if err := os.WriteFile(path, []byte(strings.TrimSpace(c.yaml)+"\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			p, err := Load(path, "")
+			p, err := Load(path, Options{})
 			if err != nil {
 				t.Fatalf("load: %v", err)
 			}
@@ -154,7 +155,7 @@ func TestRawFormAndConcat(t *testing.T) {
 	if err := os.WriteFile(path, []byte(y), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	p, err := Load(path, "")
+	p, err := Load(path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

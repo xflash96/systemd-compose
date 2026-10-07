@@ -9,13 +9,14 @@ import (
 
 func loadYAML(t *testing.T, y string) (*Project, error) {
 	t.Helper()
-	t.Setenv(ProjectNameVar, "") // the tool's own override must not leak into its tests
+	t.Setenv(ProjectNameVar, "") // the tool's own overrides must not leak into its tests
+	t.Setenv(ProfilesVar, "")
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigFileName)
 	if err := os.WriteFile(path, []byte(strings.TrimSpace(y)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return Load(path, "")
+	return Load(path, Options{})
 }
 
 func TestLoadRefusals(t *testing.T) {
@@ -83,6 +84,9 @@ func TestLoadRefusals(t *testing.T) {
 		{"specifier in a list word", "services: {a: {command: [x, '%z']}}", "not a systemd specifier"},
 		{"no command no raw", "services: {a: {working_dir: .}}", "command: is required"},
 		{"no services", "name: x", "services: is required"},
+		{"profiles not a list", "services: {a: {command: x, profiles: debug}}", "non-empty list of names"},
+		{"bad profile name", "services: {a: {command: x, profiles: [-x]}}", "a profile name is"},
+		{"required edge into an inactive profile", "services: {a: {command: x, depends_on: {b: {required: true}}}, b: {command: x, profiles: [data]}}", "add --profile data"},
 		{"empty services", "services: {}", "services: is empty"},
 	}
 	for _, c := range cases {
@@ -165,26 +169,26 @@ func TestProjectNameSources(t *testing.T) {
 	}
 	write("services: {a: {command: x}}\n")
 	t.Setenv(ProjectNameVar, "")
-	p, err := Load(path, "")
+	p, err := Load(path, Options{})
 	if err != nil || p.NameFrom != "directory" || p.Name != sanitizeName(filepath.Base(dir)) {
 		t.Fatalf("directory: %v %+v", err, p)
 	}
 	write("name: fromfile\nservices: {a: {command: x}}\n")
-	if p, _ = Load(path, ""); p.Name != "fromfile" || p.NameFrom != "name:" {
+	if p, _ = Load(path, Options{}); p.Name != "fromfile" || p.NameFrom != "name:" {
 		t.Errorf("name: -> %s from %s", p.Name, p.NameFrom)
 	}
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("# local\nOTHER=1\n"+ProjectNameVar+"=\"from_dotenv\"\n"), 0o644)
-	if p, _ = Load(path, ""); p.Name != "from_dotenv" || p.NameFrom != ".env" {
+	if p, _ = Load(path, Options{}); p.Name != "from_dotenv" || p.NameFrom != ".env" {
 		t.Errorf(".env -> %s from %s", p.Name, p.NameFrom)
 	}
 	t.Setenv(ProjectNameVar, "from_env")
-	if p, _ = Load(path, ""); p.Name != "from_env" || p.NameFrom != "environment" {
+	if p, _ = Load(path, Options{}); p.Name != "from_env" || p.NameFrom != "environment" {
 		t.Errorf("environment -> %s from %s", p.Name, p.NameFrom)
 	}
-	if p, _ = Load(path, "from_flag"); p.Name != "from_flag" || p.NameFrom != "-p" {
+	if p, _ = Load(path, Options{Name: "from_flag"}); p.Name != "from_flag" || p.NameFrom != "-p" {
 		t.Errorf("-p -> %s from %s", p.Name, p.NameFrom)
 	}
-	if _, err := Load(path, "no-dash"); err == nil || !strings.Contains(err.Error(), "from -p") {
+	if _, err := Load(path, Options{Name: "no-dash"}); err == nil || !strings.Contains(err.Error(), "from -p") {
 		t.Errorf("dashed -p should be refused, got %v", err)
 	}
 }
@@ -213,5 +217,65 @@ func TestFindConfig(t *testing.T) {
 	}
 	if got := FindConfig(deep); got != want {
 		t.Errorf("FindConfig = %q, want %q", got, want)
+	}
+}
+
+// Profiles: the enabled set is what up renders and the target wants; the
+// declared set, every profile, is what the project owns.
+func TestProfiles(t *testing.T) {
+	t.Setenv(ProfilesVar, "")
+	dir := t.TempDir()
+	path := filepath.Join(dir, ConfigFileName)
+	os.WriteFile(path, []byte(`name: pf
+services:
+  web: {command: x, depends_on: [debug]}
+  debug: {command: x, profiles: [debug]}
+  job: {command: x, schedule: hourly, profiles: [debug, nightly]}
+`), 0o644)
+	load := func(o Options) *Project {
+		t.Helper()
+		p, err := Load(path, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	p := load(Options{})
+	if got := strings.Join(p.UnitNames(), ","); got != "pf.slice,pf-web.service,pf.target" {
+		t.Errorf("no profile: UnitNames = %s", got)
+	}
+	if got := strings.Join(p.DeclaredNames(), ","); got != "pf.slice,pf-web.service,pf-debug.service,pf-job.service,pf-job.timer,pf.target" {
+		t.Errorf("DeclaredNames = %s", got)
+	}
+	if len(p.Service("web").DependsOn) != 0 {
+		t.Errorf("an optional edge into an inactive profile must be dropped: %+v", p.Service("web").DependsOn)
+	}
+	if p = load(Options{Profiles: []string{"nightly"}}); len(p.UnitNames()) != 5 || p.ProfilesFrom != "--profile" {
+		t.Errorf("nightly: %v from %s", p.UnitNames(), p.ProfilesFrom)
+	}
+	if p = load(Options{Profiles: []string{"*"}}); len(p.UnitNames()) != 6 || len(p.Service("web").DependsOn) != 1 {
+		t.Errorf("*: %v, web edges %v", p.UnitNames(), p.Service("web").DependsOn)
+	}
+	os.WriteFile(filepath.Join(dir, ".env"), []byte(ProfilesVar+"=nightly\n"), 0o644)
+	if p = load(Options{}); p.ProfilesFrom != ".env" || !p.Enabled(p.Service("job")) || p.Enabled(p.Service("debug")) {
+		t.Errorf(".env: from %s, %v", p.ProfilesFrom, p.Profiles)
+	}
+	t.Setenv(ProfilesVar, "debug, nightly")
+	if p = load(Options{}); p.ProfilesFrom != "environment" || len(p.Profiles) != 2 {
+		t.Errorf("environment: from %s, %v", p.ProfilesFrom, p.Profiles)
+	}
+	if p = load(Options{Profiles: []string{"nightly"}}); p.ProfilesFrom != "--profile" || p.Enabled(p.Service("debug")) {
+		t.Errorf("the flag must replace the variable: %v from %s", p.Profiles, p.ProfilesFrom)
+	}
+	if _, err := Load(path, Options{Profiles: []string{"debgu"}}); err == nil || !strings.Contains(err.Error(), `profile "debgu" (from --profile) is no service's`) {
+		t.Errorf("a typo in a profile must be loud: %v", err)
+	}
+	units, err := Render(load(Options{Profiles: []string{"nightly"}}), RenderOptions{Exe: "/x", SearchPath: []string{fakeBin(t, "x")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := units[len(units)-1].Text
+	if !strings.Contains(target, "Wants=pf-job.timer") || strings.Contains(target, "pf-debug") {
+		t.Errorf("the target is the enabled set:\n%s", target)
 	}
 }

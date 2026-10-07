@@ -86,6 +86,21 @@ sweep touch only the units carrying their own name. That cuts both ways:
 renaming a project leaves the old name's units registered and running, so
 take them down under the old name first, `systemd-compose -p OLDNAME down`.
 
+## Profiles
+
+A service with `profiles: [debug]` runs only while one of its profiles is
+active: `--profile debug` before the verb (repeatable), else
+`SYSTEMD_COMPOSE_PROFILES=debug,other` in the environment or in the `.env`;
+`--profile '*'` is all of them, and the flag replaces the variable, as
+compose's does. `up` renders, registers and starts the enabled services
+only, and only they boot with the project. A service of an inactive profile
+is not rendered, so a tool it needs may be missing; one that an earlier `up`
+registered is left running and named in the plan. Unlike compose's `down`,
+`down` and a bare `stop` take every profile, so nothing of the project stays
+behind; a service named on the command line is acted on whatever its
+profile. `depends_on` into an inactive profile is refused when `required`,
+and dropped otherwise.
+
 ## What the keys mean
 
 Names in `depends_on` are services in this file. Everything is rendered to
@@ -203,7 +218,6 @@ sc restart api db  # name them: a bare restart would also restart start-only ser
   true}}` on the same service: the `PartOf=` edge would restart it anyway.
 - No `version:` key. The schema is unversioned while its only files are the
   author's own; a compose-habit `version:` line gets a pointed refusal.
-- No profiles yet. They are additive when a project needs them.
 
 ## Outside a project
 

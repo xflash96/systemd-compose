@@ -29,14 +29,27 @@ const ConfigFileName = "systemd-compose.yaml"
 // this variable in .env, `name:` in the file, the directory's name.
 const ProjectNameVar = "SYSTEMD_COMPOSE_PROJECT_NAME"
 
+// ProfilesVar names the active profiles, comma-separated, from the
+// environment or the .env beside the yaml; --profile replaces it, as
+// compose's --profile replaces COMPOSE_PROFILES.
+const ProfilesVar = "SYSTEMD_COMPOSE_PROFILES"
+
+// Options are what the command line says about loading: -p and --profile.
+type Options struct {
+	Name     string
+	Profiles []string
+}
+
 // Project is the validated model of one systemd-compose.yaml.
 type Project struct {
-	Name       string
-	NameFrom   string // where Name came from: -p | environment | .env | name: | directory
-	Dir        string // directory holding the yaml, absolute
-	ConfigPath string // the yaml, absolute
-	Resources  *Resources
-	Services   []*Service // in file order
+	Name         string
+	NameFrom     string // where Name came from: -p | environment | .env | name: | directory
+	Dir          string // directory holding the yaml, absolute
+	ConfigPath   string // the yaml, absolute
+	Resources    *Resources
+	Services     []*Service // in file order, every profile
+	Profiles     []string   // the active profiles; "*" is all
+	ProfilesFrom string     // --profile | environment | .env
 }
 
 type Service struct {
@@ -56,6 +69,7 @@ type Service struct {
 	Build       *Build
 	Resources   *Resources
 	Listen      []string // ListenStream= addresses of the service's socket
+	Profiles    []string // empty: always enabled
 }
 
 type KV struct{ Key, Value string }
@@ -171,11 +185,12 @@ var (
 	reMemory      = regexp.MustCompile(`^[0-9]+[KMGT]?$`)
 	reBadName     = regexp.MustCompile(`[^A-Za-z0-9_]+`)
 	reDirective   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
+	reProfile     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 )
 
-// Load reads and validates the yaml at path. nameFlag is the -p value, or
-// empty; the environment and a .env beside the yaml are consulted next.
-func Load(path, nameFlag string) (*Project, error) {
+// Load reads and validates the yaml at path. Options carry -p and
+// --profile; the environment and a .env beside the yaml are consulted next.
+func Load(path string, o Options) (*Project, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -191,12 +206,100 @@ func Load(path, nameFlag string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	override, from := nameOverride(nameFlag, vars)
+	override, from := nameOverride(o.Name, vars)
 	p, err := parse(data, abs, override, from, vars)
+	if err == nil {
+		err = applyProfiles(p, o.Profiles, vars)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", filepath.Base(abs), err)
 	}
 	return p, nil
+}
+
+// applyProfiles settles the active profiles and what follows from them:
+// a required edge to a disabled service is refused, naming the profile to
+// activate, and an optional one is dropped (compose does both), so a
+// disabled service is never pulled in by one that is enabled.
+func applyProfiles(p *Project, flags []string, dotenv map[string]string) error {
+	switch {
+	case len(flags) > 0:
+		p.Profiles, p.ProfilesFrom = flags, "--profile"
+	case os.Getenv(ProfilesVar) != "":
+		p.Profiles, p.ProfilesFrom = splitList(os.Getenv(ProfilesVar)), "environment"
+	case dotenv[ProfilesVar] != "":
+		p.Profiles, p.ProfilesFrom = splitList(dotenv[ProfilesVar]), ".env"
+	}
+	known := map[string]bool{}
+	for _, s := range p.Services {
+		for _, n := range s.Profiles {
+			known[n] = true
+		}
+	}
+	for _, n := range p.Profiles {
+		if n != "*" && !known[n] {
+			var names []string
+			for k := range known {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			return fmt.Errorf("profile %q (from %s) is no service's; profiles in this file: %s", n, p.ProfilesFrom, strings.Join(names, ", "))
+		}
+	}
+	for _, s := range p.EnabledServices() {
+		var kept []Dependency
+		for _, d := range s.DependsOn {
+			t := p.Service(d.Service)
+			switch {
+			case p.Enabled(t):
+				kept = append(kept, d)
+			case d.Required:
+				return fmt.Errorf("service %s: depends_on: %s, which is in profile %s, not active; add --profile %s", s.Name, t.Name, strings.Join(t.Profiles, " or "), t.Profiles[0])
+			}
+		}
+		s.DependsOn = kept
+	}
+	return nil
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, f := range strings.Split(s, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// Enabled says whether a service is in this run: it names no profile, or
+// one that is active.
+func (p *Project) Enabled(s *Service) bool {
+	if len(s.Profiles) == 0 {
+		return true
+	}
+	for _, a := range p.Profiles {
+		if a == "*" {
+			return true
+		}
+		for _, n := range s.Profiles {
+			if n == a {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// EnabledServices are the services up renders and starts, in file order.
+func (p *Project) EnabledServices() []*Service {
+	var out []*Service
+	for _, s := range p.Services {
+		if p.Enabled(s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // nameOverride resolves the project name sources that live outside the yaml.
@@ -379,7 +482,7 @@ func sanitizeName(base string) string {
 }
 
 var serviceKeys = []string{"command", "working_dir", "environment", "env_file", "restart",
-	"depends_on", "schedule", "unit", "on_change", "healthcheck", "oneshot", "build", "resources", "listen", "entrypoint"}
+	"depends_on", "schedule", "unit", "on_change", "healthcheck", "oneshot", "build", "resources", "listen", "entrypoint", "profiles"}
 
 func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 	ctx := "service " + name
@@ -510,6 +613,21 @@ func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 	if n := m.get("listen"); n != nil {
 		if svc.Listen, err = parseListen(n, ctx, p.Dir); err != nil {
 			return nil, err
+		}
+	}
+	if n := m.get("profiles"); n != nil {
+		if n.Kind != yaml.SequenceNode || len(n.Content) == 0 {
+			return nil, fmt.Errorf("line %d: %s: profiles: is a non-empty list of names", n.Line, ctx)
+		}
+		for _, item := range n.Content {
+			s, err := scalar(item, ctx+": profiles")
+			if err != nil {
+				return nil, err
+			}
+			if !reProfile.MatchString(s) {
+				return nil, fmt.Errorf("line %d: %s: profiles: %q: a profile name is letters, digits, _ . and -, starting with a letter or digit", item.Line, ctx, s)
+			}
+			svc.Profiles = append(svc.Profiles, s)
 		}
 	}
 

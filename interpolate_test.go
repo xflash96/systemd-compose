@@ -113,7 +113,7 @@ services:
 `
 	path := filepath.Join(dir, ConfigFileName)
 	os.WriteFile(path, []byte(y), 0o644)
-	p, err := Load(path, "")
+	p, err := Load(path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ services:
 	}
 
 	os.WriteFile(path, []byte("services:\n  a:\n    command: node x\n    environment: {X: \"${NOPE}\"}\n"), 0o644)
-	if _, err := Load(path, ""); err == nil || !strings.Contains(err.Error(), "line 4: services: a: environment: X: NOPE is not set") {
+	if _, err := Load(path, Options{}); err == nil || !strings.Contains(err.Error(), "line 4: services: a: environment: X: NOPE is not set") {
 		t.Errorf("unset variable: %v", err)
 	}
 }
