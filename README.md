@@ -267,3 +267,7 @@ sc up foo.timer         # enable --now
 sc restart foo          # any other verb passes through to systemctl --user
 sc -s ps                # the system instance, explicitly
 ```
+
+## License
+
+Apache License 2.0; see [LICENSE](LICENSE).
