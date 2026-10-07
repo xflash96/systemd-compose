@@ -54,6 +54,7 @@ type Service struct {
 	Oneshot     bool
 	Build       *Build
 	Resources   *Resources
+	Listen      []string // ListenStream= addresses of the service's socket
 }
 
 type KV struct{ Key, Value string }
@@ -345,7 +346,7 @@ func sanitizeName(base string) string {
 }
 
 var serviceKeys = []string{"command", "working_dir", "environment", "env_file", "restart",
-	"depends_on", "schedule", "unit", "on_change", "healthcheck", "oneshot", "build", "resources"}
+	"depends_on", "schedule", "unit", "on_change", "healthcheck", "oneshot", "build", "resources", "listen"}
 
 func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 	ctx := "service " + name
@@ -363,8 +364,8 @@ func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 	// a path with a space). Then it is the author's ExecStart, verified by
 	// systemd-analyze but not resolved or refused here.
 	if n := m.get("unit"); n != nil {
-		sched := m.get("schedule") != nil
-		if svc.Unit, err = parsePassThrough(n, ctx, sched); err != nil {
+		sched, listen := m.get("schedule") != nil, m.get("listen") != nil
+		if svc.Unit, err = parsePassThrough(n, ctx, sched, listen); err != nil {
 			return nil, err
 		}
 	}
@@ -456,6 +457,11 @@ func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 			return nil, err
 		}
 	}
+	if n := m.get("listen"); n != nil {
+		if svc.Listen, err = parseListen(n, ctx, p.Dir); err != nil {
+			return nil, err
+		}
+	}
 
 	// Cross-key rules within one service.
 	if svc.OnChange == "start-only" {
@@ -471,7 +477,45 @@ func parseService(name string, node *yaml.Node, p *Project) (*Service, error) {
 	if svc.Schedule != nil && svc.Healthcheck != nil {
 		return nil, fmt.Errorf("line %d: %s: healthcheck: on a scheduled job has nothing to gate; drop one", node.Line, ctx)
 	}
+	if len(svc.Listen) > 0 && (svc.Schedule != nil || svc.Oneshot) {
+		return nil, fmt.Errorf("line %d: %s: listen: is for a long-running service that accepts its sockets; a scheduled job or a oneshot has none to accept", node.Line, ctx)
+	}
 	return svc, nil
+}
+
+// parseListen reads listen:, one address or a list, each a ListenStream=
+// line of the service's socket: a port, host:port, [v6]:port, @abstract or
+// a path. A relative path is relative to the yaml; systemd-analyze verify
+// judges the rest, so there is no second parser of addresses here.
+func parseListen(n *yaml.Node, ctx, dir string) ([]string, error) {
+	var items []*yaml.Node
+	switch n.Kind {
+	case yaml.ScalarNode:
+		items = []*yaml.Node{n}
+	case yaml.SequenceNode:
+		items = n.Content
+	default:
+		return nil, fmt.Errorf("line %d: %s: listen: is an address or a list of addresses", n.Line, ctx)
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("line %d: %s: listen: is empty", n.Line, ctx)
+	}
+	var out []string
+	for _, item := range items {
+		a, err := scalar(item, ctx+": listen")
+		if err != nil {
+			return nil, err
+		}
+		a = strings.TrimSpace(a)
+		if a == "" {
+			return nil, fmt.Errorf("line %d: %s: listen: empty address", item.Line, ctx)
+		}
+		if strings.Contains(a, "/") && !strings.HasPrefix(a, "/") && !strings.HasPrefix(a, "%") && !strings.HasPrefix(a, "@") {
+			a = filepath.Join(dir, a)
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }
 
 // refuseCommand: systemd parses the command itself, so the characters that
@@ -883,7 +927,7 @@ func parseResources(n *yaml.Node, ctx string) (*Resources, error) {
 // Sections are limited to what a service can carry; [Install] is refused
 // because boot enablement belongs to the project target alone, and io
 // controllers are refused because the user manager is not delegated them.
-func parsePassThrough(n *yaml.Node, ctx string, scheduled bool) (PassThrough, error) {
+func parsePassThrough(n *yaml.Node, ctx string, scheduled, listens bool) (PassThrough, error) {
 	var pt PassThrough
 	m, err := mapping(n, ctx+": unit")
 	if err != nil {
@@ -897,10 +941,14 @@ func parsePassThrough(n *yaml.Node, ctx string, scheduled bool) (PassThrough, er
 			if !scheduled {
 				return pt, fmt.Errorf("line %d: %s: unit: [Timer] only applies to a service with schedule:", sec.key.Line, ctx)
 			}
+		case "Socket":
+			if !listens {
+				return pt, fmt.Errorf("line %d: %s: unit: [Socket] only applies to a service with listen:", sec.key.Line, ctx)
+			}
 		case "Install":
 			return pt, fmt.Errorf("line %d: %s: unit: [Install] is refused: boot enablement is declared once, on the project target; services are pulled in by it", sec.key.Line, ctx)
 		default:
-			return pt, fmt.Errorf("line %d: %s: unit: section %q; a service carries Unit, Service and (when scheduled) Timer", sec.key.Line, ctx, sname)
+			return pt, fmt.Errorf("line %d: %s: unit: section %q; a service carries Unit, Service, Timer (with schedule:) and Socket (with listen:)", sec.key.Line, ctx, sname)
 		}
 		km, err := mapping(sec.value, ctx+": unit: "+sname)
 		if err != nil {

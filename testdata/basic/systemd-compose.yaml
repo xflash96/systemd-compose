@@ -25,6 +25,7 @@ services:
       timeout: 2s
       start_period: 30s
     resources: {memory: 512M, cpus: 0.5, pids: 64}
+    listen: [127.0.0.1:8080, run/api.sock]
     unit:
       Unit:
         Description: the api, described by hand
@@ -32,6 +33,8 @@ services:
       Service:
         TimeoutStopSec: "10"
         Environment: EXTRA=1
+      Socket:
+        Backlog: "64"
   worker:
     command: node worker.mjs
     environment:

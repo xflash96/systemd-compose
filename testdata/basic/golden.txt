@@ -34,6 +34,7 @@ Config=@DIR@/systemd-compose.yaml
 Description=the api, described by hand
 SourcePath=@DIR@/systemd-compose.yaml
 PartOf=demo.target
+Requires=demo-api.socket
 After=demo-db.service
 Requires=demo-db.service
 After=network-online.target
@@ -123,11 +124,28 @@ Project=demo
 Service=backup
 Config=@DIR@/systemd-compose.yaml
 
+### demo-api.socket
+[Unit]
+Description=demo: api (socket)
+SourcePath=@DIR@/systemd-compose.yaml
+PartOf=demo.target
+
+[Socket]
+ListenStream=127.0.0.1:8080
+ListenStream=@DIR@/run/api.sock
+Backlog=64
+
+[X-SystemdCompose]
+Project=demo
+Service=api
+Config=@DIR@/systemd-compose.yaml
+
 ### demo.target
 [Unit]
 Description=demo (systemd-compose project)
 SourcePath=@DIR@/systemd-compose.yaml
 Wants=demo-db.service
+Wants=demo-api.socket
 Wants=demo-api.service
 Wants=demo-worker.service
 Wants=demo-backup.timer

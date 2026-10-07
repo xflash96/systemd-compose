@@ -139,7 +139,7 @@ func projectMode(cfg, verb string, args []string, nameFlag string) error {
 	case "logs":
 		return pr.logs(args)
 	case "start", "stop", "restart":
-		units, err := pr.unitsFor(args)
+		units, err := pr.unitsFor(verb, args)
 		if err != nil {
 			return err
 		}
@@ -191,22 +191,29 @@ func (pr *project) scopeLine() {
 	fmt.Printf("project %s (%s, name from %s): %d units, from %s\n", pr.p.Name, pr.m.ScopeName(), pr.p.NameFrom, len(pr.p.UnitNames()), pr.p.ConfigPath)
 }
 
-// unitsFor maps service names to the units the verbs act on; no names
-// means every service.
-func (pr *project) unitsFor(args []string) ([]string, error) {
-	var units []string
+// unitsFor maps service names to the units start, stop or restart acts on;
+// no names means every service. restart takes the one unit that stands for
+// a service (a listening service keeps its socket open across it); start
+// and stop take every unit the service brings up.
+func (pr *project) unitsFor(verb string, args []string) ([]string, error) {
+	var services []*Service
 	if len(args) == 0 {
-		for _, s := range pr.p.Services {
-			units = append(units, pr.p.UnitOf(s))
-		}
-		return units, nil
+		services = pr.p.Services
 	}
 	for _, a := range args {
 		s, err := pr.p.Lookup(a)
 		if err != nil {
 			return nil, err
 		}
-		units = append(units, pr.p.UnitOf(s))
+		services = append(services, s)
+	}
+	var units []string
+	for _, s := range services {
+		if verb == "restart" {
+			units = append(units, pr.p.UnitOf(s))
+		} else {
+			units = append(units, pr.p.UnitsOf(s)...)
+		}
 	}
 	return units, nil
 }
@@ -436,7 +443,9 @@ func (pr *project) up(args []string) error {
 		row := planRow{unit: u.Name, change: "unchanged"}
 		st := before[u.Name]
 		svc := pr.serviceByUnit(u.Name)
-		isRestartable := svc != nil && pr.p.UnitOf(svc) == u.Name
+		// A listening service's socket is restartable too: try-restart on it
+		// rebinds a changed address and, through PartOf=, restarts the service.
+		isRestartable := svc != nil && (pr.p.UnitOf(svc) == u.Name || len(svc.Listen) > 0 && pr.p.SocketUnit(svc) == u.Name)
 		old, err := os.ReadFile(path)
 		switch {
 		case os.IsNotExist(err) && isRestartable && st.Active():
@@ -514,13 +523,20 @@ func (pr *project) up(args []string) error {
 		}
 		fmt.Printf("  %-32s %-22s %s\n", r.unit, r.change, act)
 	}
+	var shed, gone []orphan
 	for _, o := range orphans {
-		state := "inactive"
+		state, why := "inactive", "not in the yaml"
 		if o.active {
 			state = "ACTIVE"
 		}
-		fmt.Printf("  %-32s orphan     %s, not in the yaml: will be disabled and removed\n", o.unit, state)
-		if o.active && !force {
+		if o.shedBy != "" {
+			why = o.shedBy + " no longer declares it"
+			shed = append(shed, o)
+		} else {
+			gone = append(gone, o)
+		}
+		fmt.Printf("  %-32s orphan     %s, %s: will be disabled and removed\n", o.unit, state, why)
+		if o.active && !force && o.shedBy == "" {
 			return fmt.Errorf("orphan %s is active; stop it first (systemd-compose stop is by service name; use systemctl --user stop %s) or pass --force", o.unit, o.unit)
 		}
 	}
@@ -558,9 +574,17 @@ func (pr *project) up(args []string) error {
 	if err := pr.m.EnableNow(pr.p.TargetName()); err != nil {
 		return fmt.Errorf("enable: %w", err)
 	}
+	// A socket or timer a service shed goes before that service restarts:
+	// a socket still listening hands its fd to the new run, so the dropped
+	// listen: would never take effect.
+	if len(shed) > 0 {
+		if err := pr.retire(shed); err != nil {
+			return err
+		}
+	}
 	var startable []string
 	for _, s := range pr.p.Services {
-		startable = append(startable, pr.p.UnitOf(s))
+		startable = append(startable, pr.p.UnitsOf(s)...)
 	}
 	// Both, whatever the first says: a unit that fails to start must not
 	// leave the changed ones running their old definition.
@@ -576,8 +600,8 @@ func (pr *project) up(args []string) error {
 	if err := errors.Join(errs...); err != nil {
 		return err
 	}
-	if len(orphans) > 0 {
-		if err := pr.retire(orphans); err != nil {
+	if len(gone) > 0 {
+		if err := pr.retire(gone); err != nil {
 			return err
 		}
 	}
@@ -591,7 +615,7 @@ func (pr *project) up(args []string) error {
 
 func (pr *project) serviceByUnit(unit string) *Service {
 	for _, s := range pr.p.Services {
-		if pr.p.ServiceUnit(s) == unit || pr.p.TimerUnit(s) == unit {
+		if pr.p.ServiceUnit(s) == unit || pr.p.TimerUnit(s) == unit || pr.p.SocketUnit(s) == unit {
 			return s
 		}
 	}
@@ -677,6 +701,7 @@ func markerValue(text, key string) string {
 type orphan struct {
 	unit   string
 	active bool
+	shedBy string // a service still in the yaml that no longer has this socket or timer
 }
 
 // unregister takes units off the manager: one disable, whose reload also
@@ -732,7 +757,8 @@ func (pr *project) retire(orphans []orphan) error {
 // orphans finds units registered from this project's render directory that
 // the yaml no longer declares. Provenance is the link target's directory
 // plus the marker section; a unit that merely shares the name prefix is
-// somebody else's and is never touched.
+// somebody else's and is never touched. One whose marker names a service
+// still in the yaml is a socket or timer that service shed (shedBy).
 func (pr *project) orphans(unitDir string, names []string) ([]orphan, error) {
 	declared := map[string]bool{}
 	for _, n := range names {
@@ -746,6 +772,7 @@ func (pr *project) orphans(unitDir string, names []string) ([]orphan, error) {
 		return nil, fmt.Errorf("orphans: %w", err)
 	}
 	var found []string
+	shedBy := map[string]string{}
 	for _, e := range entries {
 		if e.Type()&os.ModeSymlink == 0 || declared[e.Name()] {
 			continue
@@ -764,6 +791,9 @@ func (pr *project) orphans(unitDir string, names []string) ([]orphan, error) {
 			continue
 		}
 		found = append(found, e.Name())
+		if s := pr.p.Service(markerValue(string(data), "Service")); s != nil {
+			shedBy[e.Name()] = s.Name
+		}
 	}
 	if len(found) == 0 {
 		return nil, nil
@@ -774,7 +804,7 @@ func (pr *project) orphans(unitDir string, names []string) ([]orphan, error) {
 	}
 	var out []orphan
 	for _, n := range found {
-		out = append(out, orphan{n, states[n].Active()})
+		out = append(out, orphan{n, states[n].Active(), shedBy[n]})
 	}
 	return out, nil
 }

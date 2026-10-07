@@ -61,16 +61,29 @@ func (p *Project) unitName(service, suffix string) string { return p.Name + "-" 
 
 func (p *Project) ServiceUnit(s *Service) string { return p.unitName(s.Name, ".service") }
 func (p *Project) TimerUnit(s *Service) string   { return p.unitName(s.Name, ".timer") }
+func (p *Project) SocketUnit(s *Service) string  { return p.unitName(s.Name, ".socket") }
 
 // UnitOf is the unit that stands for a service wherever one unit must: a
-// scheduled job is represented by its timer (the target wants the timer,
-// start/stop arm it, up starts it), every other service by itself. The
-// job's own service unit runs only when the timer fires.
+// scheduled job is represented by its timer (start/stop arm it, restart
+// re-arms it), every other service by itself. The job's own service unit
+// runs only when the timer fires.
 func (p *Project) UnitOf(s *Service) string {
 	if s.Schedule != nil {
 		return p.TimerUnit(s)
 	}
 	return p.ServiceUnit(s)
+}
+
+// UnitsOf is every unit a service brings up: what the target wants, up
+// starts and start/stop act on. A listening service is its socket and
+// itself: started together, so up is eager as compose's is, and stopped
+// together, since a socket left listening would start the service again at
+// the next connection. restart takes UnitOf alone and keeps the socket.
+func (p *Project) UnitsOf(s *Service) []string {
+	if len(s.Listen) > 0 {
+		return []string{p.SocketUnit(s), p.ServiceUnit(s)}
+	}
+	return []string{p.UnitOf(s)}
 }
 
 // UnitNames lists every unit this project renders, in render order: exactly
@@ -86,6 +99,11 @@ func (p *Project) UnitNames() []string {
 			names = append(names, p.TimerUnit(s))
 		}
 	}
+	for _, s := range p.Services {
+		if len(s.Listen) > 0 {
+			names = append(names, p.SocketUnit(s))
+		}
+	}
 	return append(names, p.TargetName())
 }
 
@@ -96,9 +114,9 @@ func Render(p *Project, opt RenderOptions) ([]Rendered, error) {
 		return nil, err
 	}
 	out := []Rendered{sl}
-	var timers []Rendered
+	var timers, sockets []Rendered
 	for _, s := range p.Services {
-		svc, tmr, err := renderService(p, s, opt)
+		svc, tmr, sock, err := renderService(p, s, opt)
 		if err != nil {
 			return nil, fmt.Errorf("service %s: %w", s.Name, err)
 		}
@@ -106,8 +124,12 @@ func Render(p *Project, opt RenderOptions) ([]Rendered, error) {
 		if tmr != nil {
 			timers = append(timers, *tmr)
 		}
+		if sock != nil {
+			sockets = append(sockets, *sock)
+		}
 	}
 	out = append(out, timers...)
+	out = append(out, sockets...)
 	tg, err := renderTarget(p)
 	if err != nil {
 		return nil, err
@@ -140,7 +162,9 @@ func renderTarget(p *Project) (Rendered, error) {
 	u.setDefault("Unit", "Description", p.Name+" (systemd-compose project)")
 	u.own("Unit", "SourcePath", p.ConfigPath, "")
 	for _, s := range p.Services {
-		u.add("Unit", "Wants", p.UnitOf(s)) // for a scheduled job: the timer, never the job
+		for _, n := range p.UnitsOf(s) { // for a scheduled job: the timer, never the job
+			u.add("Unit", "Wants", n)
+		}
 	}
 	u.own("Install", "WantedBy", "default.target", "")
 	marker(u, p, "")
@@ -151,11 +175,19 @@ func renderTarget(p *Project) (Rendered, error) {
 	return Rendered{p.TargetName(), text}, nil
 }
 
-func renderService(p *Project, s *Service, opt RenderOptions) (Rendered, *Rendered, error) {
+func renderService(p *Project, s *Service, opt RenderOptions) (svc Rendered, timer, socket *Rendered, err error) {
 	u := newUnit()
 	u.setDefault("Unit", "Description", p.Name+": "+s.Name)
 	u.own("Unit", "SourcePath", p.ConfigPath, "")
 	u.add("Unit", "PartOf", p.TargetName())
+	if len(s.Listen) > 0 {
+		// systemd's documented edge (and podman's): the socket comes along
+		// whenever anything starts the service, a dependent included, and a
+		// restart of the socket takes the service with it. Without
+		// an edge: restarting a changed socket while the service runs is
+		// refused ("already active") and leaves the socket down.
+		u.add("Unit", "Requires", p.SocketUnit(s))
+	}
 	for _, d := range s.DependsOn {
 		dep := p.unitName(d.Service, ".service")
 		u.add("Unit", "After", dep)
@@ -177,7 +209,7 @@ func renderService(p *Project, s *Service, opt RenderOptions) (Rendered, *Render
 		u.own("Service", "RemainAfterExit", "yes", "oneshot")
 	}
 	if st, err := os.Stat(s.WorkingDir); err != nil || !st.IsDir() {
-		return Rendered{}, nil, fmt.Errorf("working_dir %s: not a directory", s.WorkingDir)
+		return Rendered{}, nil, nil, fmt.Errorf("working_dir %s: not a directory", s.WorkingDir)
 	}
 	u.own("Service", "WorkingDirectory", s.WorkingDir, "working_dir")
 	for _, kv := range s.Environment {
@@ -186,7 +218,7 @@ func renderService(p *Project, s *Service, opt RenderOptions) (Rendered, *Render
 	for _, ef := range s.EnvFiles {
 		if ef.Required {
 			if _, err := os.Stat(ef.Path); err != nil {
-				return Rendered{}, nil, fmt.Errorf("env_file %s: %v (mark it {path, required: false} if it may be absent)", ef.Path, err)
+				return Rendered{}, nil, nil, fmt.Errorf("env_file %s: %v (mark it {path, required: false} if it may be absent)", ef.Path, err)
 			}
 			u.add("Service", "EnvironmentFile", ef.Path)
 		} else {
@@ -196,28 +228,28 @@ func renderService(p *Project, s *Service, opt RenderOptions) (Rendered, *Render
 	if s.Command != "" {
 		cmd, err := resolveCommand(s.Command, s.WorkingDir, opt.SearchPath)
 		if err != nil {
-			return Rendered{}, nil, fmt.Errorf("command: %w", err)
+			return Rendered{}, nil, nil, fmt.Errorf("command: %w", err)
 		}
 		u.own("Service", "ExecStart", cmd, "command")
 	}
 	if h := s.Healthcheck; h != nil {
 		test, err := resolveArgv(h.Test, s.WorkingDir, opt.SearchPath)
 		if err != nil {
-			return Rendered{}, nil, fmt.Errorf("healthcheck: test: %w", err)
+			return Rendered{}, nil, nil, fmt.Errorf("healthcheck: test: %w", err)
 		}
 		if opt.Exe == "" {
-			return Rendered{}, nil, fmt.Errorf("healthcheck: the probe needs this program's path (RenderOptions.Exe)")
+			return Rendered{}, nil, nil, fmt.Errorf("healthcheck: the probe needs this program's path (RenderOptions.Exe)")
 		}
 		words := []string{opt.Exe, "probe", "--interval", h.Interval, "--timeout", h.Timeout, "--start-period", h.StartPeriod, "--"}
 		words = append(words, test...)
 		u.add("Service", "ExecStartPost", joinWords(words))
 		sp, err := seconds(h.StartPeriod)
 		if err != nil {
-			return Rendered{}, nil, err
+			return Rendered{}, nil, nil, err
 		}
 		to, err := seconds(h.Timeout)
 		if err != nil {
-			return Rendered{}, nil, err
+			return Rendered{}, nil, nil, err
 		}
 		u.own("Service", "TimeoutStartSec", strconv.Itoa(sp+to+5)+"s", "healthcheck")
 	}
@@ -247,16 +279,30 @@ func renderService(p *Project, s *Service, opt RenderOptions) (Rendered, *Render
 		}
 	}
 
-	// Pass-through, last: Unit and Service into the service file, Timer into
-	// the timer file.
+	var k *unitFile
+	if len(s.Listen) > 0 {
+		k = newUnit()
+		k.setDefault("Unit", "Description", p.Name+": "+s.Name+" (socket)")
+		k.own("Unit", "SourcePath", p.ConfigPath, "")
+		k.add("Unit", "PartOf", p.TargetName())
+		for _, a := range s.Listen {
+			k.add("Socket", "ListenStream", a)
+		}
+	}
+
+	// Pass-through, last: Unit and Service into the service file, Timer and
+	// Socket into theirs.
 	for _, sec := range s.Unit.Sections {
 		dst := u
-		if sec.Name == "Timer" {
+		switch sec.Name {
+		case "Timer":
 			dst = t
+		case "Socket":
+			dst = k
 		}
 		for _, k := range sec.Keys {
 			if err := dst.merge(sec.Name, k); err != nil {
-				return Rendered{}, nil, err
+				return Rendered{}, nil, nil, err
 			}
 		}
 	}
@@ -267,19 +313,26 @@ func renderService(p *Project, s *Service, opt RenderOptions) (Rendered, *Render
 	}
 	text, err := u.text()
 	if err != nil {
-		return Rendered{}, nil, err
+		return Rendered{}, nil, nil, err
 	}
-	svc := Rendered{p.ServiceUnit(s), text}
-	if t == nil {
-		return svc, nil, nil
+	svc = Rendered{p.ServiceUnit(s), text}
+	if t != nil {
+		marker(t, p, s.Name)
+		ttext, err := t.text()
+		if err != nil {
+			return Rendered{}, nil, nil, err
+		}
+		timer = &Rendered{p.TimerUnit(s), ttext}
 	}
-	marker(t, p, s.Name)
-	ttext, err := t.text()
-	if err != nil {
-		return Rendered{}, nil, err
+	if k != nil {
+		marker(k, p, s.Name)
+		ktext, err := k.text()
+		if err != nil {
+			return Rendered{}, nil, nil, err
+		}
+		socket = &Rendered{p.SocketUnit(s), ktext}
 	}
-	tr := Rendered{p.TimerUnit(s), ttext}
-	return svc, &tr, nil
+	return svc, timer, socket, nil
 }
 
 func addResources(u *unitFile, section string, r *Resources) {
@@ -648,6 +701,13 @@ func repeatable(sec, key string) bool {
 	case "Timer":
 		switch key {
 		case "OnCalendar", "OnActiveSec", "OnBootSec", "OnStartupSec", "OnUnitActiveSec", "OnUnitInactiveSec":
+			return true
+		}
+	case "Socket":
+		switch key {
+		case "ListenStream", "ListenDatagram", "ListenSequentialPacket", "ListenFIFO", "ListenSpecial",
+			"ListenNetlink", "ListenMessageQueue", "ListenUSBFunction", "Symlinks",
+			"ExecStartPre", "ExecStartPost", "ExecStopPre", "ExecStopPost":
 			return true
 		}
 	}

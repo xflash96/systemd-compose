@@ -107,7 +107,8 @@ Names in `depends_on` are services in this file. Everything is rendered to
 | `build` | not rendered: steps run at `up` (when `creates:`, relative to `working_dir`, is missing) or `build`, in the service's own environment |
 | `resources` | `MemoryMax=`, `CPUQuota=`, `TasksMax=`; at project level, on the slice, where a change applies in place and restarts nothing |
 | `on_change` | `restart` (default) or `start-only`: `up` never restarts it |
-| `unit` | raw sections merged last; a directive a key above already writes is an error, even one systemd would accept twice, and so is a second `Environment=` for a variable `environment:` sets |
+| `listen` | socket activation: a `<project>-<service>.socket` with one `ListenStream=` per address (a port, `host:port`, a path relative to this file, `@abstract`), for a program that takes its sockets from `LISTEN_FDS`. `up` starts the socket and the service together; `stop` stops both, so no connection restarts it; `restart` keeps the socket open, and connections wait in its backlog. A changed address restarts both |
+| `unit` | raw sections merged last (`Socket` with `listen:`, `Timer` with `schedule:`); a directive a key above already writes is an error, even one systemd would accept twice, and so is a second `Environment=` for a variable `environment:` sets |
 
 ## What `up` does
 
@@ -130,7 +131,11 @@ Names in `depends_on` are services in this file. Everything is rendered to
    `up`.)
 5. Retires units registered from this directory that the yaml no longer
    declares. An active one is refused unless `--force`. When step 4 fails,
-   `up` stops before this; the next `up` or `down` retires them.
+   `up` stops before this; the next `up` or `down` retires them. A socket or
+   timer that a service still in the yaml dropped (its `listen:` or
+   `schedule:` removed) is part of that service's change instead: never
+   refused, and retired before the service restarts, so the new run does
+   not inherit the old socket.
 
 `up --force-recreate` restarts every running service whether it changed or
 not; `up --no-recreate` restarts none, and a changed one stays `changed (not
