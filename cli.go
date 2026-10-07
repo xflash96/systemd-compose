@@ -58,6 +58,7 @@ environment or the .env; * is all. down and stop take every profile.
 ANYWHERE:
 
   ls                       every project registered on the user instance
+  version                  this program's version, then systemd's
 
 OUTSIDE A PROJECT: the same words on the user instance (the system instance
 when run as root); --system or -s for the system instance explicitly.
@@ -156,6 +157,8 @@ parsed:
 	case "help", "-h", "--help":
 		fmt.Print(help)
 		return nil
+	case "version", "--version":
+		return printVersion()
 	case "probe":
 		return probe(args)
 	case "ls":
