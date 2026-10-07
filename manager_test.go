@@ -44,7 +44,10 @@ InactiveExitTimestamp=
 	if b.StartedBefore(time.Now()) {
 		t.Error("a unit that never started has no start to be before anything")
 	}
-	if _, err := parseStates("Id=c.service\nInactiveExitTimestamp=n/a\n"); err == nil {
+	if s, err := parseStates("Id=c.service\nInactiveExitTimestamp=n/a\n"); err != nil || !s["c.service"].Started.IsZero() {
+		t.Errorf("systemd 249 spells a never-started unit n/a: %v %+v", err, s)
+	}
+	if _, err := parseStates("Id=d.service\nInactiveExitTimestamp=yesterday\n"); err == nil {
 		t.Error("an unparseable timestamp must be an error, not a silent zero")
 	}
 }

@@ -13,7 +13,10 @@ names the system instance, and running as root defaults to it. Nothing is
 reinvented: systemd owns the processes, the journal owns the logs, and every
 verb is a few `systemctl` calls you could type yourself.
 
-One static Go binary, no runtime dependency. Linux with systemd 248 or later.
+One static Go binary, no runtime dependency. Linux with systemd 248 or later;
+CI runs it on 249 and 255. Each release has the binary for amd64 and arm64
+on the [releases page](https://github.com/xflash96/systemd-compose/releases);
+or build it:
 
 ```
 ./install            # -> ~/.local/bin/systemd-compose (needs a Go toolchain)
@@ -254,8 +257,10 @@ sc restart api db  # name them: a bare restart would also restart start-only ser
   it would render as further directives. A key given twice is refused too.
 - `on_change: start-only` cannot be combined with `depends_on: {x: {restart:
   true}}` on the same service: the `PartOf=` edge would restart it anyway.
-- No `version:` key. The schema is unversioned while its only files are the
-  author's own; a compose-habit `version:` line gets a pointed refusal.
+- No `version:` key; a compose-habit `version:` line gets a pointed refusal.
+  Releases are 0.x, and the schema's one promise is this: if a key ever has
+  to change its meaning, an optional `version:` key comes with the change,
+  and a file without one keeps meaning what it means today.
 
 ## Outside a project
 
@@ -266,6 +271,15 @@ sc logs -f foo          # journalctl --user -u foo -f
 sc up foo.timer         # enable --now
 sc restart foo          # any other verb passes through to systemctl --user
 sc -s ps                # the system instance, explicitly
+```
+
+## Tests
+
+```
+ci/unit                # gofmt, vet and the suite; no systemd needed
+ci/live                # a throwaway project through your user manager; nothing left behind
+ci/container [24.04]   # ci/live in a container booting systemd 249 (or 255); docker 28+
+ci/release v0.1.0      # the release tarballs and SHA256SUMS, into dist/
 ```
 
 ## License

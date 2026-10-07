@@ -130,7 +130,7 @@ func parseStates(out string) (map[string]UnitState, error) {
 			case "UnitFileState":
 				s.UnitFileState = v
 			case "InactiveExitTimestamp":
-				if v == "" {
+				if v == "" || v == "n/a" { // never started: 255 prints nothing, 249 n/a
 					continue
 				}
 				t, err := time.Parse(showTime, v)

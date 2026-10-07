@@ -1144,7 +1144,8 @@ func (pr *project) runBuild(s *Service) error {
 		fmt.Printf("build %s [%d/%d]: %s\n", s.Name, i+1, len(s.Build.Run), cmd)
 		args := []string{pr.m.scope(), "--wait", "--pipe", "--collect", "--quiet",
 			"--description=" + pr.p.Name + ": build " + s.Name,
-			"-p", "WorkingDirectory=" + s.WorkingDir, "-p", "Slice=" + pr.p.SliceName()}
+			"-p", "WorkingDirectory=" + s.WorkingDir}
+		args = append(args, pr.sliceProp()...)
 		// systemd-run -p is literal: no specifiers (refused at load), and
 		// %% would arrive as two percent signs.
 		env := make([]KV, 0, len(s.Environment))
@@ -1417,7 +1418,8 @@ flags:
 
 	runArgs := []string{pr.m.scope(), "--wait", "--collect", "--quiet",
 		"--description=" + pr.p.Name + ": " + verb + " " + s.Name,
-		"-p", "WorkingDirectory=" + workdir, "-p", "Slice=" + pr.p.SliceName()}
+		"-p", "WorkingDirectory=" + workdir}
+	runArgs = append(runArgs, pr.sliceProp()...)
 	if pipe || !terminal(os.Stdin) || !terminal(os.Stdout) {
 		runArgs = append(runArgs, "--pipe")
 	} else {
@@ -1448,6 +1450,19 @@ flags:
 	c := exec.Command("systemd-run", runArgs...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return asExit(c.Run())
+}
+
+// sliceProp puts a build or run unit in the project's slice once the slice
+// is registered, so the project's limits apply to it. Before that, the
+// slice would be one systemd makes on demand, which nothing ever stops: it
+// would stay active and empty after the run, and it carries no limits
+// anyway.
+func (pr *project) sliceProp() []string {
+	unitDir, err := pr.m.UnitDir()
+	if err != nil || pr.registrationOf(unitDir, pr.p.SliceName()).kind != "ours" {
+		return nil
+	}
+	return []string{"-p", "Slice=" + pr.p.SliceName()}
 }
 
 // envProps spells a service's environment and env files as systemd-run -p

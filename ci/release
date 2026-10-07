@@ -1,0 +1,44 @@
+#!/bin/bash
+# ci/release VERSION [DIR] — the files of a release: for linux amd64 and
+# arm64, a tarball holding the static binary, LICENSE, README.md and the
+# licence files of every module compiled in (Apache-2.0 4(a) and 4(d): a
+# binary carries its dependencies' LICENSE and NOTICE), plus SHA256SUMS.
+#
+#   ci/release v0.1.0          -> dist/
+#   ci/release v0.1.0 /tmp/x   -> /tmp/x
+#
+# VERSION is the tag; the binary reports it in --version.
+set -euo pipefail
+ver=${1:?usage: ci/release VERSION [DIR]}
+case $ver in v[0-9]*) ;; *) echo "ci/release: VERSION is a tag such as v0.1.0, not $ver" >&2; exit 1 ;; esac
+here=$(cd "$(dirname "$0")/.." && pwd)
+mkdir -p "${2:-$here/dist}"
+out=$(cd "${2:-$here/dist}" && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+cd "$here"
+go mod download
+deps=$(go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Dir}}{{end}}{{end}}' . | sort -u)
+
+for arch in amd64 arm64; do
+	name=systemd-compose_${ver#v}_linux_$arch
+	d=$work/$name
+	mkdir -p "$d"
+	CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+		-ldflags="-s -w -X main.version=$ver" -o "$d/systemd-compose" .
+	cp LICENSE README.md "$d/"
+	while read -r path dir; do
+		[ -n "$path" ] || continue
+		mkdir -p "$d/third_party/$path"
+		files=$(cd "$dir" && ls | grep -E '^(LICEN[CS]E|NOTICE|COPYING)' || true)
+		if [ -z "$files" ]; then
+			echo "ci/release: $path has no licence file in $dir" >&2
+			exit 1
+		fi
+		for f in $files; do cp "$dir/$f" "$d/third_party/$path/"; done
+	done <<<"$deps"
+	tar -C "$work" --sort=name --owner=0 --group=0 --numeric-owner --mode=u+w,go-w,a+rX -czf "$out/$name.tar.gz" "$name"
+done
+(cd "$out" && sha256sum -- systemd-compose_*.tar.gz >SHA256SUMS)
+ls -l "$out"

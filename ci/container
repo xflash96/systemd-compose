@@ -1,0 +1,69 @@
+#!/bin/bash
+# ci/container [UBUNTU] — run ci/live inside a container that boots systemd,
+# as an unprivileged user with lingering on: another systemd version on
+# this machine, without a CI runner.
+#
+#   ci/container          Ubuntu 22.04 (systemd 249, the oldest LTS here)
+#   ci/container 24.04    Ubuntu 24.04 (systemd 255)
+#
+# Needs docker 28 or later (writable-cgroups) with cgroup v2. Never
+# --privileged: it hands the container the host's devices and /proc/sys,
+# which the image's systemd then treats as its own (a getty on the host's
+# console, sysctl on the host's kernel). The entrypoint refuses to boot if
+# it can see a virtual console or write /proc/sys. The container is
+# removed when this script exits; if the script is stopped or killed
+# first, the container powers itself off after 15 minutes.
+set -euo pipefail
+ver=${1:-22.04}
+here=$(cd "$(dirname "$0")/.." && pwd)
+work=$(mktemp -d)
+img=systemd-compose-ci:$ver
+cid=
+
+cleanup() {
+	[ -n "$cid" ] && docker rm -f "$cid" >/dev/null 2>&1
+	rm -rf "$work"
+}
+trap cleanup EXIT
+
+(cd "$here" && CGO_ENABLED=0 go build -trimpath -o "$work/systemd-compose" .)
+
+docker build -q -t "$img" - >/dev/null <<EOF
+FROM ubuntu:$ver
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      systemd systemd-sysv dbus dbus-user-session ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd -m -s /bin/bash tester
+RUN printf '[Service]\nType=oneshot\nExecStart=/bin/systemctl --no-block poweroff\n' \
+      > /etc/systemd/system/ci-deadline.service \
+ && printf '[Timer]\nOnStartupSec=15min\n[Install]\nWantedBy=timers.target\n' \
+      > /etc/systemd/system/ci-deadline.timer \
+ && systemctl enable ci-deadline.timer
+STOPSIGNAL SIGRTMIN+3
+ENTRYPOINT ["/bin/sh", "-c", "if [ -e /dev/tty0 ] || [ -e /dev/console ] || [ -w /proc/sys ]; then echo 'refusing to boot: this container can reach the host console or /proc/sys' >&2; exit 1; fi; exec /sbin/init"]
+EOF
+
+cid=$(docker run -d --cgroupns=private --security-opt writable-cgroups=true \
+	-e container=docker --tmpfs /run --tmpfs /run/lock \
+	-v "$work/systemd-compose:/usr/local/bin/systemd-compose:ro" \
+	-v "$here/ci/live:/usr/local/bin/ci-live:ro" "$img")
+
+# Boot, then the tester's user manager through lingering.
+for _ in $(seq 60); do
+	state=$(docker exec "$cid" systemctl is-system-running 2>/dev/null || true)
+	case $state in running | degraded) break ;; esac
+	if [ "$(docker inspect -f '{{.State.Running}}' "$cid")" != true ]; then
+		docker logs "$cid" >&2
+		exit 1
+	fi
+	sleep 1
+done
+docker exec "$cid" loginctl enable-linger tester
+uid=$(docker exec "$cid" id -u tester)
+for _ in $(seq 60); do
+	docker exec "$cid" systemctl is-active -q "user@$uid.service" && break
+	sleep 1
+done
+
+docker exec -u tester -w /home/tester -e XDG_RUNTIME_DIR="/run/user/$uid" \
+	-e SC=/usr/local/bin/systemd-compose "$cid" /usr/local/bin/ci-live

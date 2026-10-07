@@ -1,0 +1,12 @@
+#!/bin/bash
+# ci/unit — what needs no systemd: formatting, vet and the test suite, with
+# the tool's own overrides cleared so the caller's shell cannot leak in.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+unformatted=$(gofmt -l .)
+if [ -n "$unformatted" ]; then
+	echo "gofmt would change: $unformatted"
+	exit 1
+fi
+go vet ./...
+SYSTEMD_COMPOSE_PROJECT_NAME= SYSTEMD_COMPOSE_PROFILES= go test -count=1 ./...
