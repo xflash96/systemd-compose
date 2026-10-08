@@ -51,6 +51,5 @@ release:
   # a v0.1.0-rc.1 tag publishes a pre-release
   prerelease: auto
 
-changelog:
-  # the notes are CHANGELOG.md's, written by hand
-  disable: true
+# No changelog: block. The release notes are CHANGELOG.md's section for the
+# tag, passed with --release-notes, and changelog: disable drops them.
