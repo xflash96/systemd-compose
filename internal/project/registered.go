@@ -20,8 +20,13 @@ type registeredUnits struct {
 	idents   map[string]string   // service -> its log tag (SyslogIdentifier=)
 }
 
-// registeredVerbs are the verbs asRegistered answers.
-var registeredVerbs = strings.Fields("down ps logs stop")
+// registeredVerbs are the verbs asRegistered answers, and how.
+var registeredVerbs = map[string]func(pr *project, args []string) error{
+	"ps":   func(pr *project, _ []string) error { return pr.table() },
+	"down": (*project).down,
+	"logs": (*project).logs,
+	"stop": (*project).stopRegistered,
+}
 
 // asRegistered answers registeredVerbs while the yaml does not load (a bad
 // edit, a teammate's broken file): the units registered from it carry their
@@ -90,27 +95,23 @@ func asRegistered(cfg, verb string, args []string, f Flags, loadErr error) (bool
 	fmt.Printf("note: the yaml does not load, so %s takes project %s as registered from it (%d units)\n", verb, proj, len(r.all))
 	pr := &project{p: &config.Project{Name: proj, Dir: filepath.Dir(abs), ConfigPath: abs}, m: m, renderDir: renderDir,
 		rendered: rendered[proj], registered: r, sel: f}
-	switch verb {
-	case "ps":
-		return true, pr.table()
-	case "down":
-		return true, pr.down(args)
-	case "stop":
-		units := r.all
-		if len(args) > 0 {
-			units = nil
-			for _, a := range args {
-				if r.services[a] == nil {
-					return true, fmt.Errorf("stop: no service %q is registered from this yaml", a)
-				}
-				units = append(units, r.services[a]...)
+	return true, registeredVerbs[verb](pr, args)
+}
+
+// stopRegistered is stop while the yaml does not load: every unit
+// registered from it, or the named services'.
+func (pr *project) stopRegistered(args []string) error {
+	units := pr.registered.all
+	if len(args) > 0 {
+		units = nil
+		for _, a := range args {
+			if pr.registered.services[a] == nil {
+				return fmt.Errorf("stop: no service %q is registered from this yaml", a)
 			}
+			units = append(units, pr.registered.services[a]...)
 		}
-		return true, pr.act("stop", units, nil)
-	case "logs":
-		return true, pr.logs(args)
 	}
-	return false, nil
+	return pr.act("stop", units, nil)
 }
 
 // movedFrom finds the yaml this project's directory was moved away from
@@ -188,6 +189,17 @@ func registered(unitDir, name string) (link, bool) {
 	return link{name, target, string(data), err}, true
 }
 
+// marker is the unit's marker as its file says it; with none to read (a
+// file gone or unreadable), the project and service its own name spells,
+// and false.
+func (l link) marker() (render.Marker, bool) {
+	if m := render.ReadMarker(l.text); l.err == nil && m.Project != "" {
+		return m, true
+	}
+	project, service := config.SplitUnitName(l.name)
+	return render.Marker{Project: project, Service: service}, false
+}
+
 // renderLinks are the units of every project registered in unitDir. err
 // is the unit directory's.
 func renderLinks(unitDir string) ([]link, error) {
@@ -227,11 +239,8 @@ func RenderDirs(unitDir string) map[string]string {
 	out := map[string]string{}
 	links, _ := renderLinks(unitDir)
 	for _, l := range links {
-		name := render.ReadMarker(l.text).Project
-		if name == "" {
-			name, _ = config.SplitUnitName(l.name)
-		}
-		out[filepath.Dir(l.target)] = name
+		m, _ := l.marker()
+		out[filepath.Dir(l.target)] = m.Project
 	}
 	return out
 }
@@ -251,15 +260,12 @@ func RegisteredConfig(name string) (string, error) {
 	var configs []string
 	unreadable := ""
 	for _, l := range links {
-		if m := render.ReadMarker(l.text); l.err == nil && m.Project != "" {
-			if m.Project == name && !slices.Contains(configs, m.Config) {
-				configs = append(configs, m.Config)
-			}
-			continue
-		}
-		// no marker to read: the unit's name says the project
-		if project, _ := config.SplitUnitName(l.name); project == name {
+		switch m, read := l.marker(); {
+		case m.Project != name:
+		case !read:
 			unreadable = filepath.Dir(filepath.Dir(l.target))
+		case !slices.Contains(configs, m.Config):
+			configs = append(configs, m.Config)
 		}
 	}
 	switch {
@@ -288,34 +294,29 @@ func (pr *project) registrationOf(unitDir, name string) registration {
 	if err != nil {
 		return registration{kind: "none"}
 	}
-	if st.Mode()&os.ModeSymlink == 0 {
-		if l, ok := registered(unitDir, name); ok {
-			if l.target == filepath.Join(pr.renderDir, name) {
-				return registration{kind: "ours", copied: true}
-			}
-			m := render.ReadMarker(l.text)
-			return registration{kind: "project", owner: "project " + m.Project + " from " + m.Config + " (a copy)"}
+	copied := st.Mode()&os.ModeSymlink == 0
+	if l, ok := registered(unitDir, name); ok {
+		if l.target == filepath.Join(pr.renderDir, name) {
+			return registration{kind: "ours", copied: copied}
 		}
+		m := render.ReadMarker(l.text)
+		owner := "another project (" + l.target + ")"
+		switch {
+		case copied:
+			owner = "project " + m.Project + " from " + m.Config + " (a copy)"
+		case os.IsNotExist(l.err):
+			owner = "a project whose files are gone (" + filepath.Dir(filepath.Dir(l.target)) + ": moved or deleted)"
+		case l.err == nil && m.Config != "":
+			owner = "project " + m.Project + " from " + m.Config
+		}
+		return registration{kind: "project", owner: owner, gone: os.IsNotExist(l.err)}
+	}
+	if copied {
 		return registration{kind: "foreign", owner: "a regular file at " + p + " (hand-written?)"}
 	}
 	target, err := os.Readlink(p)
 	if err != nil {
 		return registration{kind: "foreign", owner: p}
-	}
-	if target == filepath.Join(pr.renderDir, name) {
-		return registration{kind: "ours"}
-	}
-	if filepath.Base(filepath.Dir(target)) == filepath.Base(pr.renderDir) {
-		owner := "another project (" + target + ")"
-		data, err := os.ReadFile(target)
-		m := render.ReadMarker(string(data))
-		switch {
-		case os.IsNotExist(err):
-			owner = "a project whose files are gone (" + filepath.Dir(filepath.Dir(target)) + ": moved or deleted)"
-		case err == nil && m.Config != "":
-			owner = "project " + m.Project + " from " + m.Config
-		}
-		return registration{kind: "project", owner: owner, gone: os.IsNotExist(err)}
 	}
 	if target == "/dev/null" {
 		return registration{kind: "foreign", owner: "masked (systemctl --user unmask " + name + " undoes that)", masked: true}

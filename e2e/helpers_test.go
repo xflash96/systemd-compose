@@ -197,9 +197,12 @@ func (p *project) path(name string) string { return filepath.Join(p.dir, name) }
 // sc runs the binary under test in the project's directory.
 func (p *project) sc(args ...string) result { return run(p.dir, nil, sc, args...) }
 
+// escaped is the project's name as its units spell it: each - as \x2d.
+func (p *project) escaped() string { return strings.ReplaceAll(p.name, "-", `\x2d`) }
+
 // unit is the project's unit for a service and a suffix: unit("web",
 // ".service") is NAME-web.service.
-func (p *project) unit(service, suffix string) string { return p.name + "-" + service + suffix }
+func (p *project) unit(service, suffix string) string { return p.escaped() + "-" + service + suffix }
 
 // noChange holds when up (or up --dry-run) exited 0 and every row of its
 // plan for the project named name reads unchanged (row grammar: printPlan
@@ -229,7 +232,7 @@ func (p *project) links() int {
 	entries, _ := os.ReadDir(unitDir)
 	n := 0
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), p.name+"-") || strings.HasPrefix(e.Name(), p.name+".") {
+		if strings.HasPrefix(e.Name(), p.escaped()+"-") || strings.HasPrefix(e.Name(), p.escaped()+".") {
 			n++
 		}
 	}

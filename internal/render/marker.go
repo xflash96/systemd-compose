@@ -6,19 +6,44 @@ import (
 	"github.com/xflash96/systemd-compose/internal/config"
 )
 
-// Directive reads every value of key in section of a rendered unit's text,
-// in the order written: the reader of what unitFile writes.
-func Directive(text, section, key string) []string {
-	var values []string
-	in := false
+// UnitLine is one Key=value line of a unit file.
+type UnitLine struct{ Section, Key, Value string }
+
+// ReadUnit reads a unit file's lines in order, as systemd does: a line
+// ending in \ goes on in the next, # and ; start comments, and the spaces
+// around a key and its value are not theirs. It reads what unitFile writes
+// and what a hand-written unit holds.
+func ReadUnit(text string) []UnitLine {
+	var out []UnitLine
+	section, pending := "", ""
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "[") {
-			in = line == "["+section+"]"
+		if line != "" && (line[0] == '#' || line[0] == ';') || pending == "" && line == "" {
+			continue // a comment, inside a continued line too
+		}
+		if strings.HasSuffix(line, `\`) {
+			pending += strings.TrimSuffix(line, `\`) + " "
 			continue
 		}
-		if v, ok := strings.CutPrefix(line, key+"="); in && ok {
-			values = append(values, v)
+		line, pending = pending+line, ""
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section = line[1 : len(line)-1]
+			continue
+		}
+		if k, v, ok := strings.Cut(line, "="); ok && section != "" {
+			out = append(out, UnitLine{section, strings.TrimSpace(k), strings.TrimSpace(v)})
+		}
+	}
+	return out
+}
+
+// Directive is every value of key in section of a unit's text, in the
+// order written.
+func Directive(text, section, key string) []string {
+	var values []string
+	for _, l := range ReadUnit(text) {
+		if l.Section == section && l.Key == key {
+			values = append(values, l.Value)
 		}
 	}
 	return values
@@ -41,7 +66,7 @@ const (
 // lacks reads "".
 func ReadMarker(text string) Marker {
 	first := func(key string) string {
-		if values := Directive(text, MarkerSection, key); len(values) > 0 {
+		if values := Directive(text, markerSection, key); len(values) > 0 {
 			return values[0]
 		}
 		return ""
@@ -49,18 +74,18 @@ func ReadMarker(text string) Marker {
 	return Marker{Project: first(markerProject), Service: first(markerService), Config: first(markerConfig)}
 }
 
-// MarkerSection is the section that names, in every rendered unit, the
+// markerSection is the section that names, in every rendered unit, the
 // project and the yaml it came from. systemd ignores X- sections.
-const MarkerSection = "X-SystemdCompose"
+const markerSection = "X-SystemdCompose"
 
 // TriggersKey is the marker key a service with env files carries: the
 // files' hash, which changes the unit's text when they change.
 const TriggersKey = "RestartTriggers"
 
 func marker(u *unitFile, p *config.Project, service string) {
-	u.own(MarkerSection, markerProject, p.Name, "")
+	u.own(markerSection, markerProject, p.Name, "")
 	if service != "" {
-		u.own(MarkerSection, markerService, service, "")
+		u.own(markerSection, markerService, service, "")
 	}
-	u.own(MarkerSection, markerConfig, p.ConfigPath, "")
+	u.own(markerSection, markerConfig, p.ConfigPath, "")
 }

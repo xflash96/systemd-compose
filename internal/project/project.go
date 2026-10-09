@@ -66,7 +66,7 @@ func Run(cfg, verb string, args []string, f Flags) error {
 		var typo config.UnknownProfile
 		switch {
 		case errors.As(err, &typo):
-		case slices.Contains(registeredVerbs, verb):
+		case registeredVerbs[verb] != nil:
 			if done, ferr := asRegistered(cfg, verb, args, f, err); done {
 				return ferr
 			}

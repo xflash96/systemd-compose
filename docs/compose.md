@@ -34,8 +34,8 @@ restarts it, and keeps its logs in the journal.
 | `image`, `ports`, `volumes`, `networks` | no counterpart: a service is a program on this host. `config` names every other compose key, with what to write instead. |
 
 Keys of its own: `schedule:` (a timer), `oneshot:` (a job that ends),
-`listen:` (socket activation), `on_change:`, `resources:` (caps),
-`registration:` (links or copies) and `unit:` (raw systemd sections).
+`listen:` (socket activation), `on_change:`, `registration:` (links or
+copies) and `unit:` (raw systemd sections).
 [config.example.yaml](config.example.yaml) shows each.
 
 ## Verbs

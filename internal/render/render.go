@@ -309,7 +309,7 @@ func renderService(p *config.Project, s *config.Service, opt RenderOptions) (svc
 
 	marker(u, p, s.Name)
 	if len(s.EnvFiles) > 0 {
-		u.own(MarkerSection, TriggersKey, envFileHash(s.EnvFiles), "")
+		u.own(markerSection, TriggersKey, envFileHash(s.EnvFiles), "")
 	}
 	text, err := u.text()
 	if err != nil {
@@ -349,7 +349,7 @@ func Limits(r *config.Resources) []Limit {
 		out = append(out, Limit{"memory", "MemoryMax", r.Memory})
 	}
 	if r.CPUs > 0 {
-		out = append(out, Limit{"cpus", "CPUQuota", CPUQuota(r.CPUs)})
+		out = append(out, Limit{"cpus", "CPUQuota", cpuQuota(r.CPUs)})
 	}
 	if r.PIDs > 0 {
 		out = append(out, Limit{"pids", "TasksMax", strconv.Itoa(r.PIDs)})
@@ -357,10 +357,10 @@ func Limits(r *config.Resources) []Limit {
 	return out
 }
 
-// CPUQuota is CPUs as systemd's CPUQuota= takes them: a percent with two
+// cpuQuota is CPUs as systemd's CPUQuota= takes them: a percent with two
 // decimals at most, from whole hundredths, since cpus*100 in floating point
 // is 28.999999999999996 for 0.29, which systemd refuses.
-func CPUQuota(cpus float64) string {
+func cpuQuota(cpus float64) string {
 	q := int64(math.Round(cpus * 10000))
 	s := strconv.FormatInt(q/100, 10)
 	if q%100 != 0 {

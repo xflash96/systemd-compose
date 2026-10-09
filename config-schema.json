@@ -191,7 +191,7 @@
           "$ref": "#/definitions/interpolated"
         }
       ],
-      "description": "The project's name, the prefix of every unit. Letters, digits, _ and -, not starting with -; at most 200 characters, a - counting 4 (units spell it \\x2d). Default: the directory's name, with _ for anything else. -p NAME and SYSTEMD_COMPOSE_PROJECT_NAME override it."
+      "description": "The project's name, the prefix of every unit. Letters, digits, _ and -, not starting with -; at most 200 characters, a - counting 4 (units spell it \\x2d). Default: the directory's name, with _ for anything else (my-app gives my_app). -p NAME and SYSTEMD_COMPOSE_PROJECT_NAME override it."
     },
     "registration": {
       "anyOf": [

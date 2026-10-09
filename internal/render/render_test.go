@@ -21,8 +21,8 @@ func loadYAML(t *testing.T, y string) (*config.Project, error) {
 // floating point is 28.999999999999996 for 0.29, which systemd refuses.
 func TestCPUQuota_TwoDecimalsAtMost(t *testing.T) {
 	for cpus, want := range map[float64]string{0.29: "29%", 1.1: "110%", 2.3: "230%", 0.125: "12.5%", 0.0729: "7.29%", 2: "200%", 0.57: "57%"} {
-		if got := CPUQuota(cpus); got != want {
-			t.Errorf("CPUQuota(%v) = %q, want %q", cpus, got, want)
+		if got := cpuQuota(cpus); got != want {
+			t.Errorf("cpuQuota(%v) = %q, want %q", cpus, got, want)
 		}
 	}
 }
@@ -318,5 +318,20 @@ func TestRender_RefusesWhatSystemdWouldMisread(t *testing.T) {
 		t.Error(err)
 	} else if _, err := Render(p, RenderOptions{Exe: "/x"}); err != nil {
 		t.Errorf("a backslash of its own (doubled): %v", err)
+	}
+}
+
+// A unit file reads as systemd reads it: a trailing \ continues the line,
+// # and ; start comments, and a directive keeps its section.
+func TestReadUnit_ReadsAsSystemdDoes(t *testing.T) {
+	got := ReadUnit("# head\n[Unit]\nDescription = a b \n\n[Service]\nExecStart=/bin/sh -c \\\n  'echo hi'\n; note\nNice=5\n")
+	want := []UnitLine{{Section: "Unit", Key: "Description", Value: "a b"}, {Section: "Service", Key: "ExecStart", Value: "/bin/sh -c  'echo hi'"}, {Section: "Service", Key: "Nice", Value: "5"}}
+	if len(got) != len(want) {
+		t.Fatalf("got %q", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("directive %d: %q, want %q", i, got[i], want[i])
+		}
 	}
 }

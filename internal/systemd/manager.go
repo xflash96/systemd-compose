@@ -32,8 +32,8 @@ type ExitError struct{ Code int }
 // Error is the code; a step that wraps an ExitError prints it.
 func (e ExitError) Error() string { return "exit " + strconv.Itoa(e.Code) }
 
-// ScopeFlag is the systemctl flag that picks the instance.
-func (m *Manager) ScopeFlag() string {
+// scopeFlag is the systemctl flag that picks the instance.
+func (m *Manager) scopeFlag() string {
 	if m.User {
 		return "--user"
 	}
@@ -51,7 +51,7 @@ func (m *Manager) ScopeName() string {
 // Cmd is a command of systemd's (systemctl, journalctl, systemd-run...) on
 // this instance.
 func (m *Manager) Cmd(name string, args ...string) *exec.Cmd {
-	return exec.Command(name, append([]string{m.ScopeFlag()}, args...)...)
+	return exec.Command(name, append([]string{m.scopeFlag()}, args...)...)
 }
 
 // Run streams a systemctl call's output through and returns its failure as
@@ -295,6 +295,16 @@ func (m *Manager) RunQuiet(args ...string) (string, error) {
 	var stderr bytes.Buffer
 	err := m.run(&stderr, args, nil, nil)
 	return strings.TrimSpace(stderr.String()), err
+}
+
+// Version is systemd's version line: the first of systemctl --version.
+func Version() (string, error) {
+	out, err := exec.Command("systemctl", "--version").Output()
+	if err != nil {
+		return "", err
+	}
+	first, _, _ := strings.Cut(string(out), "\n")
+	return first, nil
 }
 
 // Linger reports whether the user manager outlives the login session.

@@ -161,10 +161,11 @@ func healthOf(st systemd.UnitState, probeExit int) string {
 // retries.
 func healthWait(s *config.Service) string {
 	sp, _ := config.Seconds(s.Healthcheck.StartPeriod)
-	w := fmt.Sprintf("until it passes or its start_period, %ds, runs out", sp)
+	def := ""
 	if s.Healthcheck.StartPeriod == config.Default("healthcheck.start_period") {
-		w = fmt.Sprintf("until it passes or its start_period, %ds by default, runs out", sp)
+		def = " by default"
 	}
+	w := fmt.Sprintf("until it passes or its start_period, %ds%s, runs out", sp, def)
 	if s.Restart != nil && s.Restart.Policy != "no" {
 		w += "; if it fails, restart: " + s.Restart.Written + " starts it again"
 	}

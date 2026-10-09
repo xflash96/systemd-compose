@@ -3,7 +3,6 @@ package project
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -251,12 +250,8 @@ func (pr *project) reach(verb string, units []string) map[string]bool {
 	var rendered []render.Rendered
 	if pr.render() == nil {
 		rendered = pr.rendered
-	} else if entries, err := os.ReadDir(pr.renderDir); err == nil {
-		for _, e := range entries {
-			if data, err := os.ReadFile(filepath.Join(pr.renderDir, e.Name())); err == nil && render.ReadMarker(string(data)).Project == pr.p.Name {
-				rendered = append(rendered, render.Rendered{Name: e.Name(), Text: string(data)})
-			}
-		}
+	} else {
+		rendered = pr.ownRendered()
 	}
 	out := map[string]bool{}
 	pulls := map[string][]string{} // unit -> what starting it starts

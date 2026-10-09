@@ -3,10 +3,11 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"runtime/debug"
 	"strings"
+
+	"github.com/xflash96/systemd-compose/internal/systemd"
 )
 
 // version is the release build's stamp, which Main is given. Otherwise
@@ -74,11 +75,10 @@ func versionLine() string {
 // e2e tests; line 2 by the e2e tests.
 func printVersion() {
 	fmt.Println(versionLine())
-	out, err := exec.Command("systemctl", "--version").Output()
+	line, err := systemd.Version()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "systemd-compose: systemctl --version:", err)
 		return
 	}
-	first, _, _ := strings.Cut(string(out), "\n")
-	fmt.Println(first)
+	fmt.Println(line)
 }

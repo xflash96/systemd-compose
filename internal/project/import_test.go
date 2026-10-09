@@ -5,22 +5,9 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
-)
 
-// A unit file reads as systemd reads it: a trailing \ continues the line,
-// # and ; start comments, and a directive keeps its section.
-func TestParseUnitFile_ReadsAsSystemdDoes(t *testing.T) {
-	got := parseUnitFile("# head\n[Unit]\nDescription = a b \n\n[Service]\nExecStart=/bin/sh -c \\\n  'echo hi'\n; note\nNice=5\n")
-	want := []directive{{"Unit", "Description", "a b"}, {"Service", "ExecStart", "/bin/sh -c  'echo hi'"}, {"Service", "Nice", "5"}}
-	if len(got) != len(want) {
-		t.Fatalf("got %q", got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("directive %d: %q, want %q", i, got[i], want[i])
-		}
-	}
-}
+	"github.com/xflash96/systemd-compose/internal/render"
+)
 
 // Environment= splits as systemd splits it: quotes group, a backslash
 // escapes.
@@ -37,7 +24,7 @@ func TestEnvWords_SplitAsSystemdDoes(t *testing.T) {
 // directory, and what a service's unit: cannot say is left out, with a
 // note.
 func TestImportService_KeepsWhatSystemdWouldRun(t *testing.T) {
-	dirs := parseUnitFile(`[Unit]
+	dirs := render.ReadUnit(`[Unit]
 Description=d
 [Service]
 WorkingDirectory=-~/app
@@ -53,7 +40,7 @@ Key=v
 [Install]
 WantedBy=default.target
 `)
-	dirs = append(dirs, parseUnitFile("[Service]\nNice=\nNice=7\n")...)
+	dirs = append(dirs, render.ReadUnit("[Service]\nNice=\nNice=7\n")...)
 	svc, notes := importService(dirs, "/home/u")
 	out, err := yaml.Marshal(svc)
 	if err != nil {
@@ -86,7 +73,7 @@ WantedBy=default.target
 // A user unit with no WorkingDirectory= runs in the home directory, so
 // the import says so: a project's service would run in the yaml's.
 func TestImportService_HomeIsTheDefaultWorkingDir(t *testing.T) {
-	svc, _ := importService(parseUnitFile("[Service]\nExecStart=/bin/true\n"), "/home/u")
+	svc, _ := importService(render.ReadUnit("[Service]\nExecStart=/bin/true\n"), "/home/u")
 	out, _ := yaml.Marshal(svc)
 	if !strings.Contains(string(out), "working_dir: /home/u # where the unit ran") {
 		t.Errorf("got\n%s", out)

@@ -115,8 +115,8 @@ func (pr *project) staleNote() {
 	// A registered unit of this project's that the yaml no longer renders:
 	// removed. (An unregistered file is a leftover the next up deletes.)
 	if uerr == nil && !stale {
-		for _, f := range pr.ownFiles() {
-			if !rendered[f] && !offProfile[f] && pr.registrationOf(unitDir, f).kind == "ours" {
+		for _, u := range pr.ownRendered() {
+			if f := u.Name; !rendered[f] && !offProfile[f] && pr.registrationOf(unitDir, f).kind == "ours" {
 				stale = true
 				break
 			}

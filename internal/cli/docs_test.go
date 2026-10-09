@@ -121,11 +121,11 @@ func TestExampleYAML_LoadsAndRenders(t *testing.T) {
 	}
 }
 
-// The man page has an entry for every verb of this program, under COMMANDS
-// (inside a project, or anywhere), and for every service key, under THE
-// PROJECT FILE, so one added later is added there too. An entry is a .TP
-// paragraph headed by the word.
-func TestManPage_NamesEveryVerbAndKey(t *testing.T) {
+// The man page has an entry for every service key, under THE PROJECT FILE,
+// so one added later is added there too. An entry is a .TP paragraph
+// headed by the word. The verbs' entries are
+// TestVerbHelp_EveryVerbHasAnEntryWithABody's.
+func TestManPage_NamesEveryKey(t *testing.T) {
 	src := repoFile(t, "docs/systemd-compose.1")
 	section := func(name string) string {
 		_, s, ok := strings.Cut(src, "\n.SH "+name+"\n")
@@ -138,13 +138,7 @@ func TestManPage_NamesEveryVerbAndKey(t *testing.T) {
 	entry := func(word string) *regexp.Regexp {
 		return regexp.MustCompile(`(?m)^\.TP( [0-9]+)?\n\.BR? (\S+ \| )*` + regexp.QuoteMeta(word) + `\b`)
 	}
-	cmds, keys := section("COMMANDS"), section("THE PROJECT FILE")
-	cmds, _, _ = strings.Cut(cmds, "\n.SS Outside a project\n") // its up, ps... are systemctl's
-	for _, v := range ourVerbs {
-		if !entry(v).MatchString(cmds) {
-			t.Errorf("docs/systemd-compose.1 has no COMMANDS entry for %s", v)
-		}
-	}
+	keys := section("THE PROJECT FILE")
 	for _, k := range config.ServiceKeys {
 		if !entry(k).MatchString(keys) {
 			t.Errorf("docs/systemd-compose.1 has no THE PROJECT FILE entry for %s", k)

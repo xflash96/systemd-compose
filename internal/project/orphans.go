@@ -10,17 +10,17 @@ import (
 	"github.com/xflash96/systemd-compose/internal/render"
 )
 
-// ownFiles are the files in the render directory whose marker names this
-// project.
-func (pr *project) ownFiles() []string {
-	var out []string
+// ownRendered are the files in the render directory whose marker names
+// this project, with their text.
+func (pr *project) ownRendered() []render.Rendered {
+	var out []render.Rendered
 	entries, _ := os.ReadDir(pr.renderDir)
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".tmp-") {
-			continue // a write in flight, not a unit's file; up sweeps old ones
+		if strings.HasPrefix(e.Name(), ".") {
+			continue // a write in flight (.tmp-), not a unit's file; up sweeps old ones
 		}
 		if data, err := os.ReadFile(filepath.Join(pr.renderDir, e.Name())); err == nil && render.ReadMarker(string(data)).Project == pr.p.Name {
-			out = append(out, e.Name())
+			out = append(out, render.Rendered{Name: e.Name(), Text: string(data)})
 		}
 	}
 	return out
@@ -35,9 +35,9 @@ func (pr *project) leftovers(unitDir string) []string {
 		declared[n] = true
 	}
 	var out []string
-	for _, f := range pr.ownFiles() {
-		if !declared[f] && pr.registrationOf(unitDir, f).kind == "none" {
-			out = append(out, f)
+	for _, u := range pr.ownRendered() {
+		if !declared[u.Name] && pr.registrationOf(unitDir, u.Name).kind == "none" {
+			out = append(out, u.Name)
 		}
 	}
 	return out

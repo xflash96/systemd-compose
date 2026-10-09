@@ -1,7 +1,6 @@
 package project
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"os"
@@ -73,13 +72,13 @@ func Import(m *systemd.Manager, unit, service string) error {
 			notes = append(notes, "left out: the drop-in "+d+", which applies by name, not to this unit alone")
 		}
 	}
-	var dirs []directive
+	var dirs []render.UnitLine
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
 			return fmt.Errorf("import: %w", err)
 		}
-		dirs = append(dirs, parseUnitFile(string(data))...)
+		dirs = append(dirs, render.ReadUnit(string(data))...)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -133,60 +132,23 @@ func Import(m *systemd.Manager, unit, service string) error {
 	return nil
 }
 
-// directive is one Key=value line of a unit file.
-type directive struct{ section, key, value string }
-
-// parseUnitFile reads a unit file's directives in order, as systemd does:
-// a line ending in \ goes on in the next, # and ; start comments.
-func parseUnitFile(text string) []directive {
-	var out []directive
-	section := ""
-	sc := bufio.NewScanner(strings.NewReader(text))
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	pending := ""
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if pending == "" && (line == "" || line[0] == '#' || line[0] == ';') {
-			continue
-		}
-		if pending != "" && line != "" && (line[0] == '#' || line[0] == ';') {
-			continue // a comment inside a continued line
-		}
-		if strings.HasSuffix(line, `\`) {
-			pending += strings.TrimSuffix(line, `\`) + " "
-			continue
-		}
-		line, pending = pending+line, ""
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section = line[1 : len(line)-1]
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok || section == "" {
-			continue
-		}
-		out = append(out, directive{section, strings.TrimSpace(k), strings.TrimSpace(v)})
-	}
-	return out
-}
-
 // importService is the service entry for a unit's directives, and what it
 // left out. An empty value resets the directive, as in systemd, so a
 // drop-in's reset takes the lines before it away.
-func importService(dirs []directive, home string) (*yaml.Node, []string) {
+func importService(dirs []render.UnitLine, home string) (*yaml.Node, []string) {
 	type key struct{ section, name string }
 	values := map[key][]string{}
 	var order []key
 	for _, d := range dirs {
-		k := key{d.section, d.key}
+		k := key{d.Section, d.Key}
 		if _, seen := values[k]; !seen {
 			order = append(order, k)
 		}
-		if d.value == "" {
+		if d.Value == "" {
 			values[k] = []string{}
 			continue
 		}
-		values[k] = append(values[k], d.value)
+		values[k] = append(values[k], d.Value)
 	}
 	var notes []string
 	svc := &yaml.Node{Kind: yaml.MappingNode}

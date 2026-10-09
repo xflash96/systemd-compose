@@ -9,7 +9,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/xflash96/systemd-compose/internal/config"
-	"github.com/xflash96/systemd-compose/internal/render"
 	"github.com/xflash96/systemd-compose/internal/systemd"
 )
 
@@ -41,12 +40,10 @@ func List(m *systemd.Manager) error {
 	byKey := map[string]*project{}
 	var keys []string
 	for _, l := range links {
-		m := render.ReadMarker(l.text)
+		m, read := l.marker() // no marker to read: the unit's name says it
 		name, where, service := m.Project, m.Config, m.Service
-		gone := l.err != nil || name == ""
+		gone := !read
 		if gone {
-			// no marker to read: the unit's own name says the project and
-			// the service
 			err := l.err
 			dir := filepath.Dir(filepath.Dir(l.target))
 			why := "files unreadable"
@@ -58,7 +55,6 @@ func List(m *systemd.Manager) error {
 			case os.IsNotExist(err):
 				why = "directory gone; README, \"Moving or deleting a project\""
 			}
-			name, service = config.SplitUnitName(l.name)
 			where = dir + " (" + why + ")"
 		}
 		k := name + "\x00" + where

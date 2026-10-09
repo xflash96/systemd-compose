@@ -97,8 +97,8 @@ go install github.com/xflash96/systemd-compose@latest    # -> $(go env GOPATH)/b
 make install                                            # from a clone: ~/.local/bin, and the man page
 ```
 
-`go install` installs no man page. `systemd-compose help man` prints the
-manual, and `systemd-compose help yaml` every key, from the binary.
+`go install` installs no man page; the binary carries the manual and the
+key reference ([Documentation](#documentation)).
 
 The directory must be on your `PATH`. The examples below use a short alias:
 
@@ -219,8 +219,7 @@ old name first: `sc -p OLDNAME down`.
 - **Hand-written unit files** give full control. systemd-compose writes the
   same files from one yaml, groups them in a slice and a target, shows a
   plan before it changes anything, and retires the units the yaml no longer
-  declares. `unit:` passes any systemd setting through, and `sc import`
-  turns a unit file into a project's service.
+  declares. `unit:` passes any systemd setting through.
 
 ## Status
 
@@ -258,8 +257,7 @@ out.
 
 Keep the project's directory on a local disk, and link the yaml into it
 from the repository. A `systemd-compose.yaml` that is a symlink makes a
-project where the link is: its name, its `.env`, its `.systemd-compose/`
-and its relative paths are the link's directory's.
+project where the link is, not where the yaml is.
 
 ```
 mkdir -p ~/services/demo && cd ~/services/demo

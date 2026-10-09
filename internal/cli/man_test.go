@@ -17,7 +17,7 @@ func TestRenderMan_SaysWhatGroffSays(t *testing.T) {
 		}
 		t.Skip("no groff here")
 	}
-	out, err := exec.Command("groff", "-man", "-Tutf8", "-P-cbou", "-rLL=80n", "../../docs/systemd-compose.1").Output()
+	out, err := exec.Command("groff", "-man", "-Tutf8", "-P-cbou", "../../docs/systemd-compose.1").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,16 +34,17 @@ func TestRenderMan_SaysWhatGroffSays(t *testing.T) {
 }
 
 // help VERB prints, for every verb of this program's, an entry of the
-// manual with its description: tags stacked over one body (run, exec)
-// reach that body.
+// manual with its description, inside a project or anywhere (Outside a
+// project's up, ps... are systemctl's): tags stacked over one body (run,
+// exec) reach that body.
 func TestVerbHelp_EveryVerbHasAnEntryWithABody(t *testing.T) {
 	for _, v := range ourVerbs {
 		if v == "help" {
 			continue // help help is the overview
 		}
 		text := manEntries(docs.Man, v)
-		if text == "" {
-			t.Errorf("help %s: no entry in the manual", v)
+		if !strings.Contains(text, "INSIDE A PROJECT:") && !strings.Contains(text, "ANYWHERE:") {
+			t.Errorf("help %s: no entry inside a project or anywhere in the manual", v)
 			continue
 		}
 		// a body line, or a short tag with its body beside it

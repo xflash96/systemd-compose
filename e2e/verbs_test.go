@@ -147,18 +147,17 @@ func TestNames_DashedProject(t *testing.T) {
 services:
   kit-web: {command: [sleep, infinity]}
 `)
-	dashed := newProject(t, "dashed", "", `name: NAME-kit
-services:
-  web: {command: [sleep, infinity]}
-`)
-	esc := plain.name + `\x2dkit`
+	dashed := newProject(t, "dashed", "", "")
+	dashed.name = plain.name + "-kit"
+	dashed.write("name: NAME\nservices:\n  web: {command: [sleep, infinity]}\n")
+	esc := dashed.escaped()
 	check(t, "up of a dashed project", dashed.sc("up").ok())
-	check(t, "  runs NAME\\x2dkit-web.service", active(esc+"-web.service"))
+	check(t, "  runs NAME\\x2dkit-web.service", active(dashed.unit("web", ".service")))
 	cg := property(esc+".slice", "ControlGroup")
 	check(t, "  in a slice of its own, not inside NAME.slice", that(strings.HasSuffix(cg, "/"+esc+".slice") && !strings.Contains(cg, "/"+plain.name+".slice/"), "ControlGroup %s", cg))
 	check(t, "up of project NAME, whose kit-web would share the unit name unescaped", plain.sc("up").ok())
 	check(t, "  runs its own", active(plain.unit("kit-web", ".service")))
-	check(t, "ls shows the dashed name as written", run("", nil, sc, "ls").shows(regexp.QuoteMeta(plain.name+"-kit")+` +running 1/1 `))
+	check(t, "ls shows the dashed name as written", run("", nil, sc, "ls").shows(regexp.QuoteMeta(dashed.name)+` +running 1/1 `))
 	check(t, "a one-off in the dashed project", dashed.sc("run", "-T", "web", "echo", "one-off ran").shows("one-off ran"))
 	// one left running is found by its unit's name, the project spelt
 	// escaped there too: ps lists it, NAME's down leaves it, its own stops it
@@ -170,19 +169,12 @@ services:
 	check(t, "a one-off left running in the dashed project", that(running() != "", "no run-%s- unit is loaded", esc))
 	check(t, "  ps lists it", dashed.sc("ps").shows(`a one-off .*still running`))
 	check(t, "down of project NAME", plain.sc("down").ok())
-	check(t, "  leaves the dashed project running", active(esc+"-web.service"))
+	check(t, "  leaves the dashed project running", active(dashed.unit("web", ".service")))
 	check(t, "  and its one-off", that(running() != "", "the dashed project's one-off was stopped"))
 	check(t, "down of the dashed project", dashed.sc("down").ok())
 	check(t, "  stops its one-off", that(running() == "", "still loaded: %s", running()))
 	wait()
-	entries, _ := os.ReadDir(unitDir)
-	left := 0
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), esc) {
-			left++
-		}
-	}
-	check(t, "  leaves no link", equal("links", left, 0))
+	check(t, "  leaves no link", equal("links", dashed.links(), 0))
 }
 
 // A verb given service names fails when one was skipped as not

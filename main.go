@@ -12,8 +12,8 @@ import (
 // version is set by a release build: -ldflags "-X main.version=v0.1.0".
 var version string
 
-// The manual and the key reference, for help: go install brings no man
-// page, and help works offline.
+// The documents help prints (cli.Docs), embedded here: go:embed reaches
+// only its own directory and below.
 var (
 	//go:embed docs/systemd-compose.1
 	manPage string

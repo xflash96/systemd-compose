@@ -63,11 +63,8 @@ func listenAddress(a string) string {
 	if strings.ContainsAny(a[:1], "@%[") || strings.HasPrefix(a, "vsock:") || strings.Contains(a, "/") {
 		return ""
 	}
-	if n, err := strconv.Atoi(a); err == nil {
-		if n < 1 || n > 65535 {
-			return "a port is 1 to 65535"
-		}
-		return ""
+	if _, err := strconv.Atoi(a); err == nil {
+		return badPort(a)
 	}
 	host, port, ok := strings.Cut(a, ":")
 	if !ok {
@@ -82,7 +79,12 @@ func listenAddress(a string) string {
 	if net.ParseIP(host) == nil {
 		return "systemd resolves no host name in a listen address: write the IP (127.0.0.1:" + port + ")"
 	}
-	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+	return badPort(port)
+}
+
+// badPort says what is wrong with a port, "" when nothing is.
+func badPort(s string) string {
+	if n, err := strconv.Atoi(s); err != nil || n < 1 || n > 65535 {
 		return "a port is 1 to 65535"
 	}
 	return ""

@@ -59,7 +59,7 @@ func (r *roff) line(l string) {
 		r.text(unescape(l))
 		return
 	}
-	name, rest, _ := strings.Cut(l[1:], " ")
+	name, rest := macro(l)
 	args := roffArgs(rest)
 	switch name {
 	case "PD":
@@ -273,56 +273,65 @@ func manEntries(src, verb string) string {
 	lines := strings.Split(src, "\n")
 	inCommands := false
 	for i := 0; i < len(lines); i++ {
-		l := lines[i]
+		name, args := macro(lines[i])
 		switch {
-		case strings.HasPrefix(l, ".SH "):
-			inCommands = strings.TrimSpace(l[4:]) == "COMMANDS"
+		case name == "SH":
+			inCommands = strings.TrimSpace(args) == "COMMANDS"
 			continue
 		case !inCommands:
 			continue
-		case strings.HasPrefix(l, ".SS "):
-			section, depth = unescape(strings.Join(roffArgs(l[4:]), " ")), 0
+		case name == "SS":
+			section, depth = unescape(strings.Join(roffArgs(args), " ")), 0
 			continue
-		case l == ".RS" || strings.HasPrefix(l, ".RS "):
+		case name == "RS":
 			depth++
-		case l == ".RE":
+		case name == "RE":
 			depth--
 		}
-		if l != ".TP" && !strings.HasPrefix(l, ".TP ") || depth != 0 || i+1 == len(lines) || !tagNames(lines[i+1], verb) {
+		if name != "TP" || depth != 0 || i+1 == len(lines) || !tagNames(lines[i+1], verb) {
 			continue
 		}
 		entry := []string{".TP", lines[i+1]}
 		d, body := 0, false
 		for j := i + 2; j < len(lines); j++ {
-			e := lines[j]
-			next := e == ".TP" || strings.HasPrefix(e, ".TP ")
-			if d == 0 && (next && body || strings.HasPrefix(e, ".SS ") || strings.HasPrefix(e, ".SH ")) {
+			e, _ := macro(lines[j])
+			if d == 0 && (e == "TP" && body || e == "SS" || e == "SH") {
 				break
 			}
 			// tags stacked over one body (.PD 0, as run's and exec's): the
 			// entry goes on through them to that body
-			if lines[j-1] != ".TP" && !strings.HasPrefix(lines[j-1], ".TP ") && printsText(e) {
+			if prev, _ := macro(lines[j-1]); prev != "TP" && printsText(lines[j]) {
 				body = true
 			}
-			switch {
-			case e == ".RS" || strings.HasPrefix(e, ".RS "):
+			switch e {
+			case "RS":
 				d++
-			case e == ".RE":
+			case "RE":
 				d--
 			}
-			entry = append(entry, e)
+			entry = append(entry, lines[j])
 		}
 		out = append(out, strings.ToUpper(section)+":", strings.TrimRight(renderAt(strings.Join(entry, "\n"), 2), "\n"), "")
 	}
 	return strings.Join(out, "\n")
 }
 
+// macro is the request a line of roff makes, and its arguments; "" for a
+// line of text.
+func macro(l string) (name, args string) {
+	if !strings.HasPrefix(l, ".") {
+		return "", ""
+	}
+	name, args, _ = strings.Cut(l[1:], " ")
+	return name, args
+}
+
 // printsText reports a line that prints: text, or a font macro's.
 func printsText(l string) bool {
+	name, _ := macro(l)
 	if !strings.HasPrefix(l, ".") {
 		return l != ""
 	}
-	name, _, _ := strings.Cut(l[1:], " ")
 	return slices.Contains([]string{"B", "I", "BR", "RB", "IR", "RI", "BI", "IB", "SM", "SB"}, name)
 }
 

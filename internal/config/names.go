@@ -11,15 +11,15 @@ import (
 // <project>-<service> ambiguous; escaped, the first - ends the project.
 func EscapeName(name string) string { return strings.ReplaceAll(name, "-", `\x2d`) }
 
-// UnescapeName is the project name an escaped unit prefix spells.
-func UnescapeName(prefix string) string { return strings.ReplaceAll(prefix, `\x2d`, "-") }
+// unescapeName is the project name an escaped unit prefix spells.
+func unescapeName(prefix string) string { return strings.ReplaceAll(prefix, `\x2d`, "-") }
 
 // SplitUnitName is UnitName read back: the project (up to the first -,
 // since the project's own are escaped) and the service ("" for the slice
 // and the target), for a unit whose file cannot be read for its marker.
 func SplitUnitName(unit string) (project, service string) {
 	prefix, service, _ := strings.Cut(strings.TrimSuffix(unit, filepath.Ext(unit)), "-")
-	return UnescapeName(prefix), service
+	return unescapeName(prefix), service
 }
 
 // TargetName is the project's target: up starts it, and boot starts it.
