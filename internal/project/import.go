@@ -61,24 +61,10 @@ func Import(m *systemd.Manager, unit, service string) error {
 		return fmt.Errorf("import: %s has no unit file (a transient or generated unit)", unit)
 	}
 
-	var notes []string
-	files := []string{fragment}
-	for _, d := range strings.Fields(props["DropInPaths"]) {
-		if filepath.Base(filepath.Dir(d)) == unit+".d" {
-			files = append(files, d)
-		} else {
-			// a prefix (foo-.service.d) or top-level (service.d) drop-in:
-			// it applies by name, and still applies, or not, by the new one
-			notes = append(notes, "left out: the drop-in "+d+", which applies by name, not to this unit alone")
-		}
-	}
-	var dirs []render.UnitLine
-	for _, f := range files {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			return fmt.Errorf("import: %w", err)
-		}
-		dirs = append(dirs, render.ReadUnit(string(data))...)
+	files, notes := ownFiles(unit, fragment, props["DropInPaths"])
+	dirs, err := readUnitFiles(files)
+	if err != nil {
+		return fmt.Errorf("import: %w", err)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -86,9 +72,26 @@ func Import(m *systemd.Manager, unit, service string) error {
 	}
 	svc, more := importService(dirs, home)
 	notes = append(notes, more...)
+	// A unit that starts this one is retired with it, its text printed to
+	// write it again from: left behind, it names a unit that is gone and
+	// fails at the next boot. A project's own stays, as the gate keeps it.
+	fragments := map[string]string{unit: fragment}
+	var retire []string
 	for _, t := range strings.Fields(props["TriggeredBy"]) {
-		notes = append(notes, "left out: "+t+", which starts this unit; "+triggerKey(t))
+		if l, ok := registered(unitDir, t); ok {
+			notes = append(notes, "left out: "+t+", which starts this unit, and stays: it is the project's in "+filepath.Dir(filepath.Dir(l.target))+"; point its Unit= at the new name there")
+			continue
+		}
+		tp, err := m.Properties(t, "FragmentPath", "DropInPaths")
+		if err != nil {
+			return fmt.Errorf("import: %w", err)
+		}
+		retire = append(retire, t)
+		fragments[t] = tp["FragmentPath"]
+		notes = append(notes, "left out: "+t+", which starts this unit and is retired with it below; "+triggerKey(t, service))
+		notes = append(notes, unitText(t, fragments[t], tp["DropInPaths"])...)
 	}
+	retire = append(retire, unit)
 
 	doc := &yaml.Node{Kind: yaml.MappingNode}
 	services := &yaml.Node{Kind: yaml.MappingNode}
@@ -114,14 +117,28 @@ func Import(m *systemd.Manager, unit, service string) error {
 	fmt.Print(text)
 	fmt.Println("# To move it into a project: put this in the project's systemd-compose.yaml")
 	fmt.Println("# (into one that exists, the service under its services:), then")
-	fmt.Printf("#   systemctl --user disable --now %s\n", unit)
-	if st, err := os.Lstat(filepath.Join(unitDir, unit)); err == nil && st.Mode().IsRegular() {
-		fmt.Printf("#   rm %s\n", shellWord(filepath.Join(unitDir, unit)))
-	} else {
-		fmt.Printf("#   (its file, %s, stays: disable keeps it from starting)\n", fragment)
+	words := make([]string, len(retire))
+	quiet := " --quiet"
+	for i, u := range retire {
+		words[i] = shellWord(u)
+		// --quiet drops systemctl's warning that a trigger is still active
+		// and its page on units without [Install], both about the state
+		// this step ends; for a unit from outside your unit directory it
+		// would also drop the one that it stays enabled for every user
+		if filepath.Dir(fragments[u]) != unitDir {
+			quiet = ""
+		}
 	}
-	if st, err := os.Stat(filepath.Join(unitDir, unit+".d")); err == nil && st.IsDir() {
-		fmt.Printf("#   rm -r %s\n", shellWord(filepath.Join(unitDir, unit+".d")))
+	fmt.Printf("#   systemctl --user disable --now%s %s\n", quiet, strings.Join(words, " "))
+	for _, u := range retire {
+		if st, err := os.Lstat(filepath.Join(unitDir, u)); err == nil && st.Mode().IsRegular() {
+			fmt.Printf("#   rm %s\n", shellWord(filepath.Join(unitDir, u)))
+		} else if fragments[u] != "" {
+			fmt.Printf("#   (its file, %s, stays: disable keeps it from starting for you)\n", fragments[u])
+		}
+		if st, err := os.Stat(filepath.Join(unitDir, u+".d")); err == nil && st.IsDir() {
+			fmt.Printf("#   rm -r %s\n", shellWord(filepath.Join(unitDir, u+".d")))
+		}
 	}
 	fmt.Println("#   systemctl --user daemon-reload")
 	fmt.Println("#   systemd-compose up")
@@ -325,14 +342,64 @@ func envWords(s string) []string {
 }
 
 // triggerKey says which key stands for a unit that starts a service.
-func triggerKey(unit string) string {
+func triggerKey(unit, service string) string {
 	switch filepath.Ext(unit) {
 	case ".timer":
 		return "give the service schedule: (docs/scheduled-jobs.md), and its other [Timer] settings under unit: Timer:"
 	case ".socket":
 		return "give the service listen:, and its other [Socket] settings under unit: Socket:"
 	}
-	return "retire it with the unit, or point it at the new name"
+	return "no key stands for it; to keep it, write it again with Unit=PROJECT-" + service + ".service"
+}
+
+// unitText is a unit's own text as notes, section by section: what the
+// retire steps delete, to write it again from.
+func unitText(unit, fragment, dropIns string) []string {
+	if fragment == "" {
+		return nil
+	}
+	files, notes := ownFiles(unit, fragment, dropIns)
+	lines, err := readUnitFiles(files)
+	if err != nil {
+		return append(notes, "  (unread: "+err.Error()+")")
+	}
+	section := ""
+	for _, l := range lines {
+		if l.Section != section {
+			section = l.Section
+			notes = append(notes, "  ["+section+"]")
+		}
+		notes = append(notes, "  "+l.Key+"="+l.Value)
+	}
+	return notes
+}
+
+// ownFiles are a unit's file and its own drop-ins (UNIT.d/), in systemd's
+// order. A prefix (foo-.service.d) or top-level (service.d) drop-in
+// applies by name, and still applies, or not, by the new one: it is
+// noted, not read.
+func ownFiles(unit, fragment, dropIns string) (files, notes []string) {
+	files = []string{fragment}
+	for _, d := range strings.Fields(dropIns) {
+		if filepath.Base(filepath.Dir(d)) == unit+".d" {
+			files = append(files, d)
+		} else {
+			notes = append(notes, "left out: the drop-in "+d+", which applies by name, not to this unit alone")
+		}
+	}
+	return files, notes
+}
+
+func readUnitFiles(files []string) ([]render.UnitLine, error) {
+	var lines []render.UnitLine
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(lines, render.ReadUnit(string(data))...)
+	}
+	return lines, nil
 }
 
 // importLoads checks the import as up would read and render it, in a

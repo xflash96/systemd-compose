@@ -296,15 +296,16 @@ sc restart api db  # restart the services it should apply to
 ## From a hand-written unit
 
 `sc import foo` prints a yaml that runs `foo.service` as a project's
-service, then the commands that retire the unit. The unit's directives go
-under `unit:` as written; `Environment=`, `EnvironmentFile=` and
-`WorkingDirectory=` become their keys. Nothing changes until you run the
-commands:
+service, then the commands that retire the unit and any unit that starts
+it. The unit's directives go under `unit:` as written; `Environment=`,
+`EnvironmentFile=` and `WorkingDirectory=` become their keys. The text of
+a timer or socket that starts it is printed as notes, for `schedule:` or
+`listen:`. Nothing changes until you run the commands:
 
 ```
 mkdir -p ~/services/foo && cd ~/services/foo
 sc import foo > systemd-compose.yaml
-systemctl --user disable --now foo.service
+systemctl --user disable --now --quiet foo.service
 rm ~/.config/systemd/user/foo.service
 systemctl --user daemon-reload
 sc up              # foo runs as foo-foo.service, project foo

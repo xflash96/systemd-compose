@@ -8,7 +8,9 @@ restarts it, and keeps its logs in the journal.
 
 1. Copy `docker-compose.yml` to `systemd-compose.yaml`.
 2. Run `systemd-compose config`. It names every key that has no
-   counterpart here, with what to write instead, all at once.
+   counterpart here, and compose's forms of the keys written another way
+   (`build: .`, a healthcheck's `CMD` and `retries`), with what to write
+   instead, all at once.
 3. Replace `image:` with `command:`: the program as it is installed on this
    host. If the program is built from source, put the steps in `build:`.
 4. Drop `ports:`. A program binds its own port. For socket activation, use

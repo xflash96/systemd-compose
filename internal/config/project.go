@@ -389,12 +389,9 @@ var topKeys = map[string]string{
 }
 
 // allUnknownKeys reports every unknown key at the top level and directly in
-// each service at once, so a ported file takes one round, not one per key.
+// each service at once, and compose's forms of the keys taken in another
+// form, so a ported file takes one round, not one per key.
 func allUnknownKeys(top *mapNode) error {
-	type finding struct {
-		line int
-		text string
-	}
 	var found []finding
 	var known []string // "where: the keys", once for each place a key was unknown
 	check := func(m *mapNode, ctx, where string, allowed []string, answer func(string, *yaml.Node) string) {
@@ -421,6 +418,7 @@ func allUnknownKeys(top *mapNode) error {
 			for _, kv := range services.pairs {
 				if m, err := mapping(kv.value, "service "+kv.key.Value); err == nil {
 					check(withoutExtensions(m), "service "+kv.key.Value, "known in a service", ServiceKeys, composeAnswer)
+					found = append(found, composeForms(m, "service "+kv.key.Value)...)
 				}
 			}
 		}
@@ -441,5 +439,5 @@ func allUnknownKeys(top *mapNode) error {
 		lines = append(lines, f.text)
 	}
 	lines = append(lines, known...)
-	return fmt.Errorf("%d keys this tool does not take (docs/compose.md):\n  %s", len(found), strings.Join(lines, "\n  "))
+	return fmt.Errorf("%d keys and values this tool does not take as written (docs/compose.md):\n  %s", len(found), strings.Join(lines, "\n  "))
 }

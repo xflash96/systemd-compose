@@ -50,7 +50,9 @@ Each edge becomes systemd directives in the dependent's unit:
 ```
 
 `test:` is a program and its arguments, run without a shell. Write
-`[sh, -c, '...']` for a shell line. It runs every `interval`, each run
+`[sh, -c, '...']` for a shell line. It runs with the service's
+environment, so `[sh, -c, 'curl -sf http://127.0.0.1:$$PORT/health']`
+reads the port the service reads. It runs every `interval`, each run
 limited to `timeout`, until it exits 0 or `start_period` is over.
 
 While it runs, the service is starting: `ps` shows it `activating` with

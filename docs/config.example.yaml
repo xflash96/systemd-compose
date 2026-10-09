@@ -194,6 +194,7 @@ services:
       # test: the probe's program and its arguments
       # - required
       # - a list; no CMD or CMD-SHELL prefix (CMD-SHELL x is [sh, -c, x])
+      # - it runs with the service's environment: environment: and env_file:
       test: [curl, -sf, "http://127.0.0.1:${API_PORT:-8080}/health"]
       # interval: optional, default: 2s; whole seconds
       interval: 2s

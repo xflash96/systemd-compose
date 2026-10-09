@@ -13,7 +13,8 @@ Each release of systemd-compose, newest first.
   all, `help yaml` every key of the file, and `help man` the whole manual.
   `help` alone lists the verbs, one line each.
 - `import UNIT` prints a `systemd-compose.yaml` that runs a unit you wrote
-  by hand as a project's service, and the commands that retire the unit.
+  by hand as a project's service, and the commands that retire the unit
+  and any unit that starts it, a timer or a socket, whose text it prints.
 - `registration: copy` registers copies of the units instead of links to
   `.systemd-compose/`, so they load at boot while the project's filesystem
   (NFS, FUSE) is not mounted yet. `up` warns when a project there is
@@ -22,6 +23,9 @@ Each release of systemd-compose, newest first.
   after its plan has said so. Its healthcheck line says how long it waits
   in the yaml's terms: until the test passes or `start_period` runs out,
   and what the service's `restart:` does if it fails.
+- `config` names a compose file's `build: .` and a healthcheck's `CMD` and
+  `retries` in the same round as the keys it does not take, each with
+  what to write instead.
 - Outside a project, `-p NAME` acts on the project registered under that
   name, wherever its yaml is, as compose's `-p` does: `systemd-compose -p
   demo logs -f`.

@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -360,8 +361,7 @@ func TestUnit_AsSystemdReadsIt(t *testing.T) {
 func TestImport_RunsTheUnitAsAProjectsService(t *testing.T) {
 	unit := prefix + "_hand.service"
 	out := filepath.Join(t.TempDir(), "out")
-	file := filepath.Join(unitDir, unit)
-	text := fmt.Sprintf(`[Unit]
+	file := writeUnit(t, unit, fmt.Sprintf(`[Unit]
 Description=a hand-written unit
 [Service]
 Environment="A=one two" B=$HOME
@@ -370,10 +370,7 @@ ExecStart=/bin/sh -c 'echo "$A|$B|$C|$(pwd)" > %s; exec sleep infinity'
 Nice=5
 [Install]
 WantedBy=default.target
-`, out)
-	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
-		t.Fatal(err)
-	}
+`, out))
 	t.Cleanup(func() {
 		systemctl("disable", "--now", unit)
 		os.Remove(file)
@@ -389,18 +386,62 @@ WantedBy=default.target
 	imp := run(p.dir, nil, sc, "import", unit)
 	check(t, "import exits 0", imp.ok())
 	p.file("systemd-compose.yaml", "name: "+p.name+"\n"+imp.out)
-	steps := 0
-	for _, l := range strings.Split(imp.out, "\n") {
-		if cmd, ok := strings.CutPrefix(l, "#   "); ok && !strings.HasPrefix(cmd, "(") && !strings.HasPrefix(cmd, "systemd-compose ") {
-			steps++
-			check(t, "  its step "+cmd, run("", nil, "sh", "-c", cmd).ok())
-		}
-	}
-	check(t, "  prints the steps that retire the unit", equal("steps", steps, 3))
+	check(t, "  prints the steps that retire the unit", equal("steps", runRetireSteps(t, imp.out), 3))
 	check(t, "  which leave no unit file", missing(file))
 	check(t, "up of the import", p.sc("up").ok())
 	check(t, "  runs the same command the same way", equal("its line", waitFile(out), before))
 	check(t, "  with the unit's settings", equal("Nice", property(p.unit(strings.TrimSuffix(unit, ".service"), ".service"), "Nice"), "5"))
+}
+
+func TestImport_RetiresTheTimerThatStartsIt(t *testing.T) {
+	unit := prefix + "_job"
+	files := []string{writeUnit(t, unit+".service", "[Service]\nType=oneshot\nExecStart=/bin/true\n"),
+		writeUnit(t, unit+".timer", "[Timer]\nOnCalendar=*-*-* 03:30:00\nPersistent=true\n[Install]\nWantedBy=timers.target\n")}
+	t.Cleanup(func() {
+		systemctl("disable", "--now", unit+".timer")
+		for _, f := range files {
+			os.Remove(f)
+		}
+		systemctl("daemon-reload")
+	})
+	systemctl("daemon-reload")
+	check(t, "the hand-written timer is enabled", systemctl("enable", "--now", unit+".timer").ok())
+
+	imp := run("", nil, sc, "import", unit+".service")
+	check(t, "import shows the timer's own text", imp.shows(`^#   \[Timer\]\n#   OnCalendar=\*-\*-\* 03:30:00\n#   Persistent=true$`))
+	check(t, "  prints the steps that retire the unit and its timer", equal("steps", runRetireSteps(t, imp.out), 4))
+	check(t, "  which leave neither file", errors.Join(missing(files[0]), missing(files[1])))
+	check(t, "  nor the timer's enablement", missing(filepath.Join(unitDir, "timers.target.wants", unit+".timer")))
+	check(t, "  nor a timer to fail at the next boot", equal("LoadState", property(unit+".timer", "LoadState"), "not-found"))
+}
+
+// writeUnit writes a hand-written unit file into the unit directory, and
+// says where.
+func writeUnit(t *testing.T, name, text string) string {
+	t.Helper()
+	file := filepath.Join(unitDir, name)
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+// runRetireSteps runs the shell steps import prints after its yaml, and
+// says how many there were.
+func runRetireSteps(t *testing.T, out string) int {
+	t.Helper()
+	_, steps, _ := strings.Cut(out, "# To move it into a project")
+	n := 0
+	for _, l := range strings.Split(steps, "\n") {
+		if cmd, ok := strings.CutPrefix(l, "#   "); ok && !strings.HasPrefix(cmd, "(") && !strings.HasPrefix(cmd, "systemd-compose ") {
+			n++
+			check(t, "  its step "+cmd, run("", nil, "sh", "-c", cmd).ok())
+		}
+	}
+	return n
 }
 
 // waitFile is the file's text once it has a line, or "" after 10s.

@@ -35,25 +35,22 @@ func parseHealthcheck(n *yaml.Node, ctx string) (*Healthcheck, error) {
 	// Every problem of the block at once: they are independent, and a
 	// ported compose healthcheck often has three.
 	var problems []string
+	for _, f := range composeHealthcheck(m, ctx) {
+		problems = append(problems, f.text)
+	}
 	known := &mapNode{}
 	for _, kv := range m.pairs {
-		// compose's keys with no counterpart, answered in its terms
-		why := map[string]string{
-			"retries":        "the probe runs again every interval until start_period has passed (" + Default("healthcheck.start_period") + " unless set); a shorter start_period fails sooner",
-			"start_interval": "the probe runs every interval from the start",
-			"disable":        "leave out the healthcheck: key instead",
-		}[kv.key.Value]
-		if why != "" {
-			problems = append(problems, fmt.Sprintf("line %d: %s: healthcheck: %s: %s", kv.key.Line, ctx, kv.key.Value, why))
-		} else {
+		if composeHealthKey(kv.key.Value) == "" {
 			known.pairs = append(known.pairs, kv)
 		}
 	}
 	if err := unknownKeys(known, ctx+": healthcheck", healthcheckMap.names()...); err != nil {
 		problems = append(problems, err.Error())
 	}
-	if err := healthTest(h, m, n, ctx); err != nil {
-		problems = append(problems, err.Error())
+	if tn := m.get("test"); tn == nil || composeTest(tn) == "" {
+		if err := healthTest(h, m, n, ctx); err != nil {
+			problems = append(problems, err.Error())
+		}
 	}
 	for _, f := range []struct {
 		key string
@@ -100,16 +97,6 @@ func healthTest(h *Healthcheck, m *mapNode, n *yaml.Node, ctx string) error {
 			return fmt.Errorf("line %d: %s: healthcheck: test: %v", item.Line, ctx, err)
 		}
 		h.Test = append(h.Test, s)
-	}
-	// test: is the probe's argv, run without a shell: compose's prefixes
-	// name a form, not a program.
-	switch h.Test[0] {
-	case "CMD":
-		return fmt.Errorf("line %d: %s: healthcheck: test: drop compose's \"CMD\": test: is the program and its arguments, e.g. [curl, -sf, http://127.0.0.1:8080/health]", tn.Line, ctx)
-	case "CMD-SHELL":
-		return fmt.Errorf("line %d: %s: healthcheck: test: compose's \"CMD-SHELL x\" is [sh, -c, x] here", tn.Line, ctx)
-	case "NONE":
-		return fmt.Errorf("line %d: %s: healthcheck: test: compose's \"NONE\": leave out the healthcheck: key instead", tn.Line, ctx)
 	}
 	return refuseProgram(h.Test[0], ctx+": healthcheck: test", tn.Line)
 }

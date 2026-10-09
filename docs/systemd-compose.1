@@ -233,6 +233,9 @@ Units that an older version of the yaml registered from this directory are
 retired too, running or not.
 The rendered files stay in
 .BR .systemd-compose/ .
+Take a project down before you move or delete its directory, and run
+.B up
+in the new place: the registered units name this directory.
 .TP
 .B ps
 The project's units and their state, with a
@@ -293,6 +296,12 @@ nothing registered to start.
 .B stop
 exits 1 when a name given is running but is not this project's, and leaves
 it running.
+On a service with
+.B schedule:
+they act on its timer;
+.B run
+.I SERVICE
+runs the job now.
 .TP
 .B kill \fR[\fB\-s\fR \fISIGNAL\fR] \fISERVICE\fR...
 Send a signal to the service's processes: SIGTERM, or the one that
@@ -438,7 +447,8 @@ that runs the service unit
 .I UNIT
 of the user instance as the project's service
 .I SERVICE
-(the unit's name by default), then the commands that retire the unit.
+(the unit's name by default), then the commands that retire the unit and
+any unit that starts it.
 The directives of the unit file and of its own drop-ins go under
 .B unit:
 as written.
@@ -459,6 +469,10 @@ is your home directory, where a user unit runs.
 and
 .B [Install]
 are left out, each with a note.
+A unit that starts it, a timer or socket, is noted with its text, for
+.B schedule:
+or
+.BR listen: .
 It changes nothing, and exits 1 when the yaml would not load.
 .TP
 .BR version ", " \-\-version
