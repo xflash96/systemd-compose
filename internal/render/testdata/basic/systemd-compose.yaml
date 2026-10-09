@@ -21,9 +21,11 @@ services:
       db: {condition: service_completed_successfully, required: true}
     healthcheck:
       test: [curl, -sf, http://127.0.0.1:8080/health]
-      interval: 1s
+      interval: 10s
       timeout: 2s
+      retries: 5
       start_period: 30s
+      start_interval: 1s
     resources: {memory: 512M, cpus: 0.5, pids: 64}
     listen: [127.0.0.1:8080, run/api.sock]
     unit:

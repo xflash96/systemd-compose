@@ -209,7 +209,7 @@ func (pr *project) unregister(units []string) (stopped int, err error) {
 	}
 	rfErr := pr.m.ResetFailed(units)
 	if len(still) > 0 {
-		return stopped, fmt.Errorf("unregistered, but %s still running after the stop: systemctl --user stop %s", strings.Join(still, ", "), strings.Join(still, " "))
+		return stopped, fmt.Errorf("unregistered, but %s still running after the stop: systemctl --user stop %s", strings.Join(still, ", "), unitWords(still...))
 	}
 	return stopped, rfErr
 }

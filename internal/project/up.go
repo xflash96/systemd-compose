@@ -157,7 +157,7 @@ func (pr *project) up(args []string) error {
 	}
 	pr.printPlan(pl)
 	if pl.refused != "" {
-		return fmt.Errorf("orphan %s is active; stop it first (systemd-compose stop is by service name; use systemctl --user stop %s) or pass --force", pl.refused, pl.refused)
+		return fmt.Errorf("orphan %s is active; stop it first (systemd-compose stop is by service name; use systemctl --user stop %s) or pass --force", pl.refused, unitWords(pl.refused))
 	}
 	if o.dryRun {
 		fmt.Println("dry run: nothing built, written, registered, started, retired or removed")
@@ -223,8 +223,8 @@ func (pr *project) upNotes(unitDir string) {
 	if kind := systemd.LateFS(pr.p.Dir, unitDir); kind != "" && pr.p.Registration == "link" {
 		fmt.Printf("WARNING: this project is on %s, and registration: link makes its units links into it: when the user manager starts before %s is mounted (at boot), they are missing, and the project does not start, then or once it is mounted. Without registration: link, up registers copies; README, \"A project on a network filesystem\"\n", kind, kind)
 	}
-	if cfg, name := pr.movedFrom(unitDir); cfg != "" && name != pr.p.Name {
-		fmt.Printf("WARNING: this directory was moved from %s without a down, and project %s is still registered from there: this up starts a second copy, as project %s. README, \"Moving or deleting a project\", moves one\n", filepath.Dir(cfg), name, pr.p.Name)
+	if cfg, r := pr.movedFrom(unitDir); cfg != "" && r.project != pr.p.Name {
+		fmt.Printf("WARNING: this directory was moved from %s without a down, and project %s is still registered from there: this up starts a second copy, as project %s. README, \"Moving or deleting a project\", moves one\n", filepath.Dir(cfg), r.project, pr.p.Name)
 	}
 }
 
@@ -236,13 +236,13 @@ func (pr *project) claimNames(unitDir string, names []string) (map[string]system
 	for _, n := range names {
 		if r := pr.registrationOf(unitDir, n); r.kind == "project" || r.kind == "foreign" {
 			if r.gone {
-				return nil, fmt.Errorf("%s is already registered by %s. If that is this project before a move, move it back and run down there (README, \"Moving or deleting a project\", has the way by hand); or run this copy under another name: %s up", n, r.owner, pr.cmdAs("NAME"))
+				return nil, fmt.Errorf("%s is already registered by %s. If that is this project before a move, %s; or run this copy under another name: %s up", n, r.owner, r.retire(), pr.cmdAs("NAME"))
 			}
 			if r.kind == "project" {
 				return nil, fmt.Errorf("%s is already registered by %s. Run this copy under another name (%s up, or SYSTEMD_COMPOSE_PROJECT_NAME=NAME in a .env beside the yaml), or take that one down in its own directory", n, r.owner, pr.cmdAs("NAME"))
 			}
 			if r.masked {
-				return nil, fmt.Errorf("%s is masked: unmask it (%s unmask %s, or systemctl --user unmask %s), then up", n, pr.cmd(), n, n)
+				return nil, fmt.Errorf("%s is masked: unmask it (%s unmask %s, or systemctl --user unmask %s), then up", n, pr.cmd(), unitWords(n), unitWords(n))
 			}
 			return nil, fmt.Errorf("%s is already %s; give this project another name (name:, -p NAME, or the .env) or retire that unit", n, r.owner)
 		}
@@ -1050,7 +1050,7 @@ func (pr *project) pending(path string) bool {
 func (pr *project) applyCmd(unit string) string {
 	svc := pr.serviceByUnit(unit)
 	if svc == nil {
-		return "systemctl --user restart " + unit
+		return "systemctl --user restart " + unitWords(unit)
 	}
 	if len(svc.Listen) > 0 && unit == pr.p.SocketUnit(svc) {
 		return pr.cmd() + " stop " + svc.Name + " && " + pr.cmd() + " start " + svc.Name

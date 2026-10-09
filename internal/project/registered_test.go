@@ -58,6 +58,15 @@ func TestRegistrationOf_OnlyOwnLinksAndCopiesAreOurs(t *testing.T) {
 	if r := pr.registrationOf(unitDir, "demo-g.service"); !r.gone || r.owner != "a project whose files are gone (/elsewhere: moved, deleted or not mounted)" {
 		t.Errorf("a copy whose yaml is gone: gone %v, owner %q", r.gone, r.owner)
 	}
+	// gone, a copy is retired by -p NAME from outside a project; a link,
+	// which held no name but its target's, only from where it was
+	if r := pr.registrationOf(unitDir, "demo-g.service"); !strings.HasPrefix(r.retire(), "cd / && systemd-compose -p demo down") {
+		t.Errorf("a gone copy's way out: %q", r.retire())
+	}
+	os.Symlink("/gone/demo/.systemd-compose/demo-k.service", filepath.Join(unitDir, "demo-k.service"))
+	if r := pr.registrationOf(unitDir, "demo-k.service"); !r.gone || !strings.HasPrefix(r.retire(), "move it back") {
+		t.Errorf("a gone link: gone %v, way out %q", r.gone, r.retire())
+	}
 	if r := pr.registrationOf(unitDir, "demo-h.service"); r.gone || r.owner != "project demo from "+otherCfg+" (a copy)" {
 		t.Errorf("another project's copy: gone %v, owner %q", r.gone, r.owner)
 	}

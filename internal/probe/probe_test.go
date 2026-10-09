@@ -3,6 +3,7 @@ package probe
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -194,18 +195,18 @@ func TestRun_LeavesTheWatchAfterAPassedStart(t *testing.T) {
 	program.Wait() // no zombie: the program is gone
 	syscall.Kill(st.PID, syscall.SIGTERM)
 	for end := time.Now().Add(3 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
-		if _, err := os.Stat(StatePath(id)); os.IsNotExist(err) {
+		if _, err := os.Stat(statePath(id)); os.IsNotExist(err) {
 			return
 		}
 	}
-	t.Errorf("%s outlived the program and the watch's SIGTERM", StatePath(id))
+	t.Errorf("%s outlived the program and the watch's SIGTERM", statePath(id))
 }
 
 // A state is a live watch's only: not one whose watch is gone, nor one
 // whose pid another process has now. A start prunes the others.
 func TestReadState_TakesOnlyALiveWatch(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
-	dir := filepath.Dir(StatePath("own"))
+	dir := filepath.Dir(statePath("own"))
 	for id, st := range map[string]State{
 		"own":    {PID: os.Getpid(), Start: procStart(os.Getpid())},
 		"reused": {PID: os.Getpid(), Start: "1"}, // this pid, an earlier process's start
@@ -223,6 +224,28 @@ func TestReadState_TakesOnlyALiveWatch(t *testing.T) {
 	prune(dir)
 	if entries, _ := os.ReadDir(dir); len(entries) != 1 || entries[0].Name() != "own" {
 		t.Errorf("after prune: %v, want own alone", entries)
+	}
+}
+
+// The state is read across builds: a unit runs the probe copy of the
+// build that rendered it, and ps may be a later one. A state as an older
+// watch wrote it, read by name: a renamed field keeps a reader for the
+// old name.
+func TestState_KeepsItsJSONNames(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	path := statePath("written")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pid := os.Getpid()
+	text := fmt.Sprintf(`{"pid":%d,"start":%q,"healthy":false,"failed":4,"last":"exit status 1","since":"2026-10-08T12:00:00Z"}`, pid, procStart(pid))
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, ok := ReadState("written")
+	want := State{PID: pid, Start: procStart(pid), Healthy: false, Failed: 4, Last: "exit status 1", Since: time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)}
+	if !ok || st != want {
+		t.Errorf("ReadState = %+v, %v; want %+v", st, ok, want)
 	}
 }
 

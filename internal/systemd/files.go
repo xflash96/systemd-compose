@@ -34,13 +34,19 @@ func WriteUnit(path, text string) error {
 	case err != nil && !os.IsNotExist(err):
 		return err
 	}
-	// O_EXCL, a name no one chose; a leading dot, which the readers of the
-	// unit directory skip, so a copy half written is never taken for one
+	return ReplaceFile(path, []byte(text))
+}
+
+// ReplaceFile writes data to path whole or not at all, through a file
+// beside it renamed into place: O_EXCL, a name no one chose, mode 0600; a
+// leading dot, which the readers of the tool's directories skip, so a file
+// half written is never taken for one.
+func ReplaceFile(path string, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
 	if err != nil {
 		return err
 	}
-	if _, err := f.WriteString(text); err != nil {
+	if _, err := f.Write(data); err != nil {
 		f.Close()
 		os.Remove(f.Name())
 		return err
@@ -54,6 +60,18 @@ func WriteUnit(path, text string) error {
 		return err
 	}
 	return nil
+}
+
+// RuntimeDir is the tool's directory in the user's runtime directory,
+// which a reboot empties: the projects' locks, a run's scratch files, the
+// healthchecks' states. Outside a login session XDG_RUNTIME_DIR may be
+// unset; /run/user/UID is where systemd puts it.
+func RuntimeDir() string {
+	rt := os.Getenv("XDG_RUNTIME_DIR")
+	if rt == "" {
+		rt = filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
+	}
+	return filepath.Join(rt, "systemd-compose")
 }
 
 // PrivateDir makes dir, or takes it as it is, only if it is a directory of

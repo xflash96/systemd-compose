@@ -117,11 +117,11 @@ func (pr *project) stopRegistered(args []string) error {
 // movedFrom finds the yaml this project's directory was moved away from
 // without a down: its render directory holds files whose marker names a
 // yaml that is gone, and the units of that name are still registered from
-// the files' old place. "" when there is none.
-func (pr *project) movedFrom(unitDir string) (yaml, name string) {
+// the files' old place, as r says. "" when there is none.
+func (pr *project) movedFrom(unitDir string) (yaml string, r registration) {
 	entries, err := os.ReadDir(pr.renderDir)
 	if err != nil {
-		return "", ""
+		return "", r
 	}
 	for _, e := range entries {
 		data, err := os.ReadFile(filepath.Join(pr.renderDir, e.Name()))
@@ -132,19 +132,21 @@ func (pr *project) movedFrom(unitDir string) (yaml, name string) {
 			continue
 		}
 		if l, ok := registered(unitDir, e.Name()); ok && l.target == filepath.Join(filepath.Dir(cfg), config.RenderDirName, e.Name()) {
-			return cfg, m.Project
+			st, err := os.Lstat(filepath.Join(unitDir, e.Name()))
+			return cfg, registration{kind: "project", gone: true, copied: err == nil && st.Mode().IsRegular(), project: m.Project}
 		}
 	}
-	return "", ""
+	return "", r
 }
 
 // registration says who owns the search-path entry for a unit name.
 type registration struct {
-	kind   string // "none" | "ours" | "project" | "foreign"
-	owner  string // for "project": the other yaml; for "foreign": what sits there
-	gone   bool   // for "project": its files are gone (moved, deleted, not mounted)
-	masked bool   // for "foreign": a link to /dev/null
-	copied bool   // for "ours": a copy, not a link (registration: copy)
+	kind    string // "none" | "ours" | "project" | "foreign"
+	owner   string // for "project": the other yaml; for "foreign": what sits there
+	gone    bool   // for "project": its files are gone (moved, deleted, not mounted)
+	masked  bool   // for "foreign": a link to /dev/null
+	copied  bool   // for "ours" and "project": a copy, not a link (registration: copy)
+	project string // for "project": its name, as -p takes it
 }
 
 // notOurs starts the note on a name registered by someone else.
@@ -153,6 +155,16 @@ const notOurs = "NOT OURS: "
 // note is a "project" or "foreign" registration as ps and the verbs print
 // it.
 func (r registration) note() string { return notOurs + r.owner }
+
+// retire is the way to take down a project whose files are gone. A copy
+// holds what -p NAME needs, but only outside a project: in one, -p names
+// that yaml's project. A link holds nothing once its target is gone.
+func (r registration) retire() string {
+	if r.copied && r.project != "" {
+		return "cd / && systemd-compose -p " + r.project + " down retires it"
+	}
+	return "move it back and run down there; README, \"Moving or deleting a project\", has the way by hand"
+}
 
 // link is a unit a project registered, as the unit directory holds it: a
 // link into a render directory, or a copy of a rendered file
@@ -316,7 +328,7 @@ func (pr *project) registrationOf(unitDir, name string) registration {
 		case l.err == nil && m.Config != "":
 			owner = "project " + m.Project + " from " + m.Config
 		}
-		return registration{kind: "project", owner: owner, gone: gone}
+		return registration{kind: "project", owner: owner, gone: gone, copied: copied, project: m.Project}
 	}
 	if copied {
 		return registration{kind: "foreign", owner: "a regular file at " + p + " (hand-written?)"}
@@ -326,7 +338,7 @@ func (pr *project) registrationOf(unitDir, name string) registration {
 		return registration{kind: "foreign", owner: p}
 	}
 	if target == "/dev/null" {
-		return registration{kind: "foreign", owner: "masked (systemctl --user unmask " + name + " undoes that)", masked: true}
+		return registration{kind: "foreign", owner: "masked (systemctl --user unmask " + unitWords(name) + " undoes that)", masked: true}
 	}
 	return registration{kind: "foreign", owner: "a link to " + target}
 }

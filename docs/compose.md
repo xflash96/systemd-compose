@@ -70,8 +70,8 @@ Flags that differ:
   compose. The two may not set one key to different values.
 - `depends_on` without a condition is `Wants=`: the dependent starts even
   if its dependency fails. `required: true` makes it `Requires=`.
-- A healthcheck's `start_period` is how long the start waits for a pass
-  (60s by default); past it the start fails, where compose keeps the
-  container running. `timeout` defaults to 5s and `start_interval` to 2s
-  (compose: 30s and 5s).
+- A healthcheck's `start_period` is how long the start waits for a pass;
+  past it the start fails, where compose keeps the container running.
+  `start_period` defaults to 60s (compose: 0s), `timeout` defaults to 5s
+  (compose: 30s), and `start_interval` defaults to 2s (compose: 5s).
 - There is no `version:` key.

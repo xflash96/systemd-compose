@@ -79,7 +79,7 @@ services:
 	systemctl("daemon-reload")
 	check(t, "  with its render directory wiped, ps shows w running", p.sc("ps").says("^"+p.name+`-w\.service .* active *running`))
 	check(t, "  and down unregisters it", p.sc("down").ok())
-	check(t, "  every link is gone", equal("links", p.links(), 0))
+	check(t, "  nothing stays registered", equal("entries", p.registered(), 0))
 	check(t, "up of the third project once more", p.sc("up").ok())
 	f, err := os.OpenFile(p.path("systemd-compose.yaml"), os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
@@ -95,7 +95,7 @@ services:
 	stop := p.sc("stop", "w")
 	check(t, "  stop w stops d along, and says so", firstErr(stop.ok(), stop.says(p.name+`-d\.service +stopped too, through a dependency`), stop.says("once the yaml loads")))
 	check(t, "  with a yaml that does not load, down unregisters it", p.sc("down").says("as registered from it"))
-	check(t, "  every link is gone", equal("links", p.links(), 0))
+	check(t, "  nothing stays registered", equal("entries", p.registered(), 0))
 	p.write(writer("infinity"))
 }
 
@@ -163,7 +163,7 @@ func TestDown_SocketWithAWaitingConnection(t *testing.T) {
 	}
 	time.Sleep(2 * time.Second)
 	check(t, "  down with a connection waiting exits 0", p.sc("down").ok())
-	check(t, "  and unregisters it all", equal("links", p.links(), 0))
+	check(t, "  and unregisters it all", equal("entries", p.registered(), 0))
 	systemctl("stop", p.unit("s", ".service"), p.unit("s", ".socket"), p.name+".slice")
 }
 
@@ -322,6 +322,19 @@ func TestRegistration_CopiesLoadWithoutTheProject(t *testing.T) {
 	check(t, "up --force retires a dropped service's copy", p.sc("up", "--force").shows("retired orphan "+regexp.QuoteMeta(p.unit("b", ".service"))))
 	check(t, "  and removes it", missing(filepath.Join(unitDir, p.unit("b", ".service"))))
 	check(t, "down", p.sc("down").ok())
-	check(t, "  leaves no copy or link", equal("entries", p.links(), 0))
+	check(t, "  leaves no copy or link", equal("entries", p.registered(), 0))
 	check(t, "  nor the boot link", missing(filepath.Join(unitDir, "default.target.wants", p.name+".target")))
+
+	// Moved without a down: in its new place -p names that yaml's project,
+	// so the copies are retired from outside any project, as down says.
+	check(t, "up again", p.sc("up").ok())
+	if err := os.Rename(p.dir, away); err != nil {
+		t.Fatal(err)
+	}
+	check(t, "moved without a down, down in the new place names the way out", run(away, nil, sc, "down").says(regexp.QuoteMeta("before a move, cd / && systemd-compose -p "+p.name+" down retires it")))
+	check(t, "  which retires the copies", firstErr(run("/", nil, sc, "-p", p.name, "down").ok(), equal("entries", p.registered(), 0)))
+	check(t, "  and stops the service", inactive(unit))
+	if err := os.Rename(away, p.dir); err != nil {
+		t.Fatal(err)
+	}
 }

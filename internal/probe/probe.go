@@ -99,7 +99,7 @@ func Run(args []string) error {
 	gone := func() bool { return mainPID > 0 && syscall.Kill(mainPID, 0) == syscall.ESRCH }
 	t := test{argv: argv, timeout: time.Duration(to) * time.Second, gone: gone}
 	if watching {
-		return t.watch(time.Duration(iv)*time.Second, n, StatePath(os.Getenv("INVOCATION_ID")))
+		return t.watch(time.Duration(iv)*time.Second, n, statePath(os.Getenv("INVOCATION_ID")))
 	}
 
 	deadline := time.Now().Add(time.Duration(sp) * time.Second)
@@ -122,7 +122,7 @@ func Run(args []string) error {
 		}
 		if r.err == nil {
 			fmt.Printf("probe: healthy after %d attempt(s)\n", attempt)
-			watchAfter(args, StatePath(os.Getenv("INVOCATION_ID")))
+			watchAfter(args, statePath(os.Getenv("INVOCATION_ID")))
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -367,22 +367,21 @@ type State struct {
 	Since   time.Time `json:"since"`  // when Healthy last changed
 }
 
-// StatePath is where the watch of the service run invocation keeps its
+// statePath is where the watch of the service run invocation keeps its
 // State: the user's runtime directory, which a reboot empties. "" when
-// either is unknown.
-func StatePath(invocation string) string {
-	rt := os.Getenv("XDG_RUNTIME_DIR")
-	if rt == "" || invocation == "" || strings.ContainsRune(invocation, '/') {
+// the invocation is unknown.
+func statePath(invocation string) string {
+	if invocation == "" || strings.ContainsRune(invocation, '/') {
 		return ""
 	}
-	return filepath.Join(rt, "systemd-compose", "health", invocation)
+	return filepath.Join(systemd.RuntimeDir(), "health", invocation)
 }
 
 // ReadState reads the State of the service run invocation, if its watch
 // is still there to keep it.
 func ReadState(invocation string) (State, bool) {
 	var st State
-	path := StatePath(invocation)
+	path := statePath(invocation)
 	if path == "" {
 		return st, false
 	}
@@ -436,24 +435,7 @@ func writeState(path string, st State) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
-		return err
-	}
-	if err := os.Rename(f.Name(), path); err != nil {
-		os.Remove(f.Name())
-		return err
-	}
-	return nil
+	return systemd.ReplaceFile(path, data)
 }
 
 // tail keeps the last max bytes written to it.

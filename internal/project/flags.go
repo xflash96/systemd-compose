@@ -35,3 +35,13 @@ func shellWord(w string) string {
 	}
 	return "'" + strings.ReplaceAll(w, "'", `'\''`) + "'"
 }
+
+// unitWords are unit names as a printed command gives them: a dashed
+// project's units spell it \x2d, which a shell reads as x2d unquoted.
+func unitWords(units ...string) string {
+	words := make([]string, len(units))
+	for i, u := range units {
+		words[i] = shellWord(u)
+	}
+	return strings.Join(words, " ")
+}

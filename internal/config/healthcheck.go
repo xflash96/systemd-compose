@@ -38,25 +38,18 @@ func parseHealthcheck(n *yaml.Node, ctx string) (*Healthcheck, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Every problem of the block at once: they are independent, and a
-	// ported compose healthcheck often has three.
+	// Every problem of the block at once: they are independent.
 	var problems []string
-	for _, f := range composeHealthcheck(m, ctx) {
-		problems = append(problems, f.text)
-	}
-	known := &mapNode{}
-	for _, kv := range m.pairs {
-		if kv.key.Value != "disable" { // answered above
-			known.pairs = append(known.pairs, kv)
-		}
-	}
-	if err := unknownKeys(known, ctx+": healthcheck", healthcheckMap.names()...); err != nil {
+	if err := unknownKeys(m, ctx+": healthcheck", healthcheckMap.names()...); err != nil {
 		problems = append(problems, err.Error())
 	}
-	if tn := m.get("test"); tn == nil || composeTest(tn) == "" {
-		if err := healthTest(h, m, n, ctx); err != nil {
-			problems = append(problems, err.Error())
-		}
+	// compose's forms of test: are named before interpolation, with the
+	// unknown keys; this one is a form only once a value fills it in,
+	// as [$X, curl] with X=CMD
+	if tn := m.get("test"); tn != nil && composeTest(tn) != "" {
+		problems = append(problems, fmt.Sprintf("line %d: %s: healthcheck: test: %s", tn.Line, ctx, composeTest(tn)))
+	} else if err := healthTest(h, m, n, ctx); err != nil {
+		problems = append(problems, err.Error())
 	}
 	if rn := m.get("retries"); rn != nil {
 		k, _ := healthcheckMap.key("retries")

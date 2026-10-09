@@ -53,8 +53,8 @@ func (pr *project) staleNote() {
 			fmt.Printf("note: %s (a git clean?); the units run what systemd loaded before, and up writes the files again\n", goneFiles(gone))
 			return
 		}
-		if cfg, name := pr.movedFrom(unitDir); cfg != "" {
-			fmt.Printf("note: this directory was moved from %s without a down, and project %s is still registered from there; README, \"Moving or deleting a project\"\n", filepath.Dir(cfg), name)
+		if cfg, r := pr.movedFrom(unitDir); cfg != "" {
+			fmt.Printf("note: this directory was moved from %s without a down, and project %s is still registered from there; README, \"Moving or deleting a project\"\n", filepath.Dir(cfg), r.project)
 			return
 		}
 		// Registered under a profile this run does not have: the render
@@ -300,7 +300,7 @@ func (pr *project) table() error {
 		}
 		for _, n := range oneOffs {
 			s := ost[n]
-			row("", n, s.LoadState, s.ActiveState, s.SubState, "a one-off (systemd-compose run or build) still running; systemctl --user stop "+n+" ends it")
+			row("", n, s.LoadState, s.ActiveState, s.SubState, "a one-off (systemd-compose run or build) still running; systemctl --user stop "+unitWords(n)+" ends it")
 		}
 	}
 	return w.Flush()

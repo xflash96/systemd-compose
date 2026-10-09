@@ -136,7 +136,7 @@ func (pr *project) act(verb string, units, flags []string) error {
 			switch {
 			case a.Result == "timeout" && pr.leftRunning(n):
 				// SendSIGKILL=no: systemd gives up and calls the unit stopped
-				what, along = "NOT stopped: it outlived its stop timeout, and SendSIGKILL=no left it running", "; systemctl --user kill -s KILL "+n+" ends it"
+				what, along = "NOT stopped: it outlived its stop timeout, and SendSIGKILL=no left it running", "; systemctl --user kill -s KILL "+unitWords(n)+" ends it"
 				failed = append(failed, n)
 			case a.Result == "timeout":
 				what = "stopped, but only after systemd killed it at its stop timeout (it ignored SIGTERM)"
@@ -185,7 +185,7 @@ func (pr *project) act(verb string, units, flags []string) error {
 			alongside = alongside || verb == "stop"
 		}
 		if svc != nil && svc.Schedule != nil && n == pr.p.TimerUnit(svc) && verb != "stop" {
-			what += " (" + svc.Name + " itself runs when the timer fires; " + pr.cmd() + " run " + svc.Name + " runs it now, on this terminal, and systemctl --user start " + pr.p.ServiceUnit(svc) + " as the timer would, into logs)"
+			what += " (" + svc.Name + " itself runs when the timer fires; " + pr.cmd() + " run " + svc.Name + " runs it now, on this terminal, and systemctl --user start " + unitWords(pr.p.ServiceUnit(svc)) + " as the timer would, into logs)"
 		}
 		fmt.Printf("  %-32s %s%s\n", n, what, along)
 		printed[n] = true

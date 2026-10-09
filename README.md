@@ -25,9 +25,9 @@ the file. [Try it](#try-it) starts with a small one.
 - `up` prints a plan, checks the units with `systemd-analyze verify` first,
   and restarts only the services that changed
   ([when up fails](docs/troubleshooting.md#when-up-fails)).
-- `depends_on` with compose's conditions, healthchecks that gate the start and keep checking,
-  and jobs that run to the end before their dependents start
-  ([dependencies and healthchecks](docs/dependencies.md)).
+- `depends_on` with compose's conditions, healthchecks that gate the start
+  and keep checking, and jobs that run to the end before their dependents
+  start ([dependencies and healthchecks](docs/dependencies.md)).
 - Scheduled jobs on systemd timers ([scheduled jobs](docs/scheduled-jobs.md)),
   and socket activation ([examples/socket](examples/socket)).
 - Memory, CPU and process caps, per service and for the whole project
@@ -224,8 +224,9 @@ old name first: `sc -p OLDNAME down`.
 
 systemd-compose is new, and its releases are 0.x. A verb or a key may
 still change, and the [changelog](CHANGELOG.md) says when one does. If a
-key ever has to change its meaning, an optional `version:` key will come
-with the change, and a file without one will keep its meaning.
+key ever has to change its meaning so that a file that worked no longer
+does, an optional `version:` key will come with the change, and a file
+without one will keep its meaning.
 
 CI tests it on systemd 249 (Ubuntu 22.04) and 255 (Ubuntu 24.04).
 
@@ -234,10 +235,10 @@ CI tests it on systemd 249 (Ubuntu 22.04) and 255 (Ubuntu 24.04).
 Take a project down before you move or delete its directory. Its units are
 registered as that directory's: moved or deleted, they fail to start at
 boot, and `up` in a new place refuses them. If you have moved or deleted
-it already, `sc -p NAME down` from anywhere retires them. With
-`registration: link`, move it back and run `down` there, or remove the
-units by hand. Set `N` to the project
-name as `sc ls` shows it, with each `-` written `\x2d`:
+it already, `sc -p NAME down` outside any project retires them (in a
+project, `-p` names that project). With `registration: link`, move it
+back and run `down` there, or remove the units by hand. Set `N` to the
+project name as `sc ls` shows it, with each `-` written `\x2d`:
 
 ```
 N='my\x2dapp'
@@ -255,8 +256,8 @@ is expected.
 at boot wherever the project lives. On NFS, FUSE or another filesystem
 mounted after your user manager starts, a service whose files are there
 fails to start at boot until it is mounted. Then `sc up` in the project,
-or `sc -p NAME up` from anywhere, starts it; a `restart:` with a delay
-retries it on its own:
+or `sc -p NAME up` outside any project, starts it; a `restart:` with a
+delay retries it on its own:
 
 ```yaml
 services:
@@ -303,7 +304,8 @@ service, then the commands that retire the unit and any unit that starts
 it. The unit's directives go under `unit:` as written; `Environment=`,
 `EnvironmentFile=` and `WorkingDirectory=` become their keys. The text of
 a timer or socket that starts it is printed as notes, for `schedule:` or
-`listen:`. Nothing changes until you run the commands:
+`listen:`. Nothing changes until you run the steps at the end of the
+file. For a foo that no timer or socket starts, they are:
 
 ```
 mkdir -p ~/services/foo && cd ~/services/foo

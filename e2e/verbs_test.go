@@ -172,14 +172,14 @@ services:
 		time.Sleep(100 * time.Millisecond)
 	}
 	check(t, "a one-off left running in the dashed project", that(running() != "", "no run-%s- unit is loaded", esc))
-	check(t, "  ps lists it", dashed.sc("ps").shows(`a one-off .*still running`))
+	check(t, "  ps lists it, with a stop a shell reads as written", dashed.sc("ps").shows(`a one-off .*still running; systemctl --user stop 'run-`+regexp.QuoteMeta(esc)+`-[^ ]*' ends it`))
 	check(t, "down of project NAME", plain.sc("down").ok())
 	check(t, "  leaves the dashed project running", active(dashed.unit("web", ".service")))
 	check(t, "  and its one-off", that(running() != "", "the dashed project's one-off was stopped"))
 	check(t, "down of the dashed project", dashed.sc("down").ok())
 	check(t, "  stops its one-off", that(running() == "", "still loaded: %s", running()))
 	wait()
-	check(t, "  leaves no link", equal("links", dashed.links(), 0))
+	check(t, "  leaves nothing registered", equal("entries", dashed.registered(), 0))
 }
 
 // A verb given service names fails when one was skipped as not

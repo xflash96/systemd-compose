@@ -814,6 +814,11 @@ or
 of a project at a time, and the files a run keeps while it works: its
 verify copies, a one-off's environment and how it ended, each named with
 its process's pid and swept once that process is gone.
+.I health/
+holds what each healthchecked service's checks last found, for
+.BR ps :
+one file per run of the service, named by its invocation ID, removed when
+the checks end.
 .SH EXIT STATUS
 .TP
 .B 0

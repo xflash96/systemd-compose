@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -72,6 +73,7 @@ func TestExamples_Webapp(t *testing.T) {
 	url := fmt.Sprintf("http://127.0.0.1:%d/books", port)
 	check(t, "up of examples/webapp exits 0", p.sc("up").ok())
 	check(t, "  migrate has run", p.sc("ps").shows(p.name+`-migrate\.service .*active *exited`))
+	check(t, "  ps says the api is healthy", p.sc("ps").shows(p.name+`-api\.service .*running +healthy`))
 	books, err := get(url)
 	check(t, "  the api lists no books", firstErr(err, equal("the books", strings.TrimSpace(books), "[]")))
 	c := http.Client{Timeout: 10 * time.Second}
@@ -109,6 +111,9 @@ func TestExamples_Backups(t *testing.T) {
 	archive := p.path("archive/notes-" + time.Now().Format("2006-01-02") + ".tar.gz")
 	check(t, "  and makes today's archive of notes/", run("", nil, "tar", "-tzf", archive).shows(`^notes/todo\.txt$`))
 	check(t, "  run prune exits 0, and keeps today's archive", firstErr(p.sc("run", "-T", "prune").ok(), exists(archive)))
+	job := p.unit("backup", ".service")
+	check(t, "  start backup names a run as the timer's", p.sc("start", "backup").shows(`systemctl --user start '?`+regexp.QuoteMeta(job)+`'? as the timer would`))
+	check(t, "  which runs it, into logs", firstErr(run("", nil, "systemctl", "--user", "start", job).ok(), p.sc("logs", "--no-color", "backup").shows(`Finished .*: backup\.$`))) // 249 leaves out the unit's name
 	check(t, "  down exits 0", p.sc("down").ok())
 }
 

@@ -60,7 +60,7 @@ func TestProject(t *testing.T) {
 	// 1. a dry run on a fresh project writes nothing
 	check(t, "up --dry-run on a fresh project exits 0", p.sc("up", "--dry-run").ok())
 	check(t, "  and writes no render directory", missing(p.path(".systemd-compose")))
-	check(t, "  and registers nothing", equal("links", p.links(), 0))
+	check(t, "  and registers nothing", equal("entries", p.registered(), 0))
 	check(t, "run before any up works from the yaml", p.sc("run", "job").shows("job ran"))
 	check(t, "  and leaves nothing loaded (no on-demand slice)", equal("units loaded", units(), 0))
 
@@ -194,7 +194,7 @@ func TestProject(t *testing.T) {
 	check(t, "up with the extras again", p.sc("up").ok())
 	p.write(mainYAML("2", "", "256M"))
 	check(t, "a bare down after dropping them exits 0", p.sc("down").ok())
-	check(t, "  every link is gone, debug's too", equal("links", p.links(), 0))
+	check(t, "  nothing stays registered, debug's too", equal("entries", p.registered(), 0))
 	check(t, "run after a down works from the yaml", p.sc("run", "job").shows("job ran"))
 }
 

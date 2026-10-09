@@ -117,10 +117,8 @@ func Import(m *systemd.Manager, unit, service string) error {
 	fmt.Print(text)
 	fmt.Println("# To move it into a project: put this in the project's systemd-compose.yaml")
 	fmt.Println("# (into one that exists, the service under its services:), then")
-	words := make([]string, len(retire))
 	quiet := " --quiet"
-	for i, u := range retire {
-		words[i] = shellWord(u)
+	for _, u := range retire {
 		// --quiet drops systemctl's warning that a trigger is still active
 		// and its page on units without [Install], both about the state
 		// this step ends; for a unit from outside your unit directory it
@@ -129,7 +127,7 @@ func Import(m *systemd.Manager, unit, service string) error {
 			quiet = ""
 		}
 	}
-	fmt.Printf("#   systemctl --user disable --now%s %s\n", quiet, strings.Join(words, " "))
+	fmt.Printf("#   systemctl --user disable --now%s %s\n", quiet, unitWords(retire...))
 	for _, u := range retire {
 		if st, err := os.Lstat(filepath.Join(unitDir, u)); err == nil && st.Mode().IsRegular() {
 			fmt.Printf("#   rm %s\n", shellWord(filepath.Join(unitDir, u)))

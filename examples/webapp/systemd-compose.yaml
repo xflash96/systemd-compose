@@ -22,7 +22,8 @@ services:
     restart: on-failure
     depends_on:
       migrate: {condition: service_completed_successfully}
-    # up waits until the api answers, and so does the worker.
+    # up waits until the api answers, and so does the worker. Then the
+    # check runs every 30s, and ps says healthy or unhealthy.
     healthcheck:
       test: [python3, app/check.py, "http://127.0.0.1:${API_PORT:-8080}/health"]
       start_interval: 1s

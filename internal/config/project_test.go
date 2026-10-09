@@ -67,6 +67,8 @@ func TestLoad_RefusesWhatHasNoFaithfulForm(t *testing.T) {
 		{"a tilde", `services: {a: {command: "a ~/conf"}}`, "does not expand ~"},
 		{"compose CMD prefix", `services: {a: {command: x, healthcheck: {test: [CMD, curl, -f, x]}}}`, `drop compose's "CMD"`},
 		{"compose CMD-SHELL prefix", `services: {a: {command: x, healthcheck: {test: [CMD-SHELL, "curl -f x"]}}}`, "is [sh, -c, x] here"},
+		{"compose NONE", `services: {a: {command: x, healthcheck: {test: [NONE]}}}`, `test: compose's "NONE" turns off an image's healthcheck; here, leave out the healthcheck: key`},
+		{"compose CMD from a variable", `services: {a: {command: x, healthcheck: {test: ["${X:-CMD}", curl, -f, x]}}}`, `line 1: service a: healthcheck: test: drop compose's "CMD"`},
 		{"bare env key", "services: {a: {command: x, environment: [PATH]}}", "write PATH=value"},
 		{"bad env key", "services: {a: {command: x, environment: {1ABC: v}}}", "not a valid variable name"},
 		{"bad restart", "services: {a: {command: x, restart: sometimes}}", "use no, on-failure, always or unless-stopped"},

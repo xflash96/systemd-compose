@@ -221,8 +221,10 @@ func TestExampleYAML_ShowsEveryKeyWordDefaultAndBound(t *testing.T) {
 	})
 	guides, _ := filepath.Glob("../../docs/*.md")
 	inline := regexp.MustCompile(`(?m)^\s*([a-z_]+): .*#.*\bdefault:? ([^\s,;]+)`)
+	prose := regexp.MustCompile("`([a-z_]+)`\\s+defaults\\s+to\\s+([^\\s,;.()]+)")
 	for _, g := range guides {
-		for _, m := range inline.FindAllStringSubmatch(repoFile(t, strings.TrimPrefix(g, "../../")), -1) {
+		text := repoFile(t, strings.TrimPrefix(g, "../../"))
+		for _, m := range append(inline.FindAllStringSubmatch(text, -1), prose.FindAllStringSubmatch(text, -1)...) {
 			if !slices.Contains(defaults()[m[1]], m[2]) {
 				t.Errorf("%s says %s's default is %s, which the spec does not", filepath.Base(g), m[1], m[2])
 			}

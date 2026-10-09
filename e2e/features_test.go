@@ -217,7 +217,7 @@ func TestProfiles_RequiredByAnother(t *testing.T) {
 	check(t, "  ps without the profile exits 0 and reads the yaml", p.sc("ps").lacks("does not load|has not applied"))
 	check(t, "  up without it names the profile", p.sc("up").says("add --profile dbg"))
 	check(t, "  down without it exits 0", p.sc("down").ok())
-	check(t, "  and nothing of it stays registered", equal("links", p.links(), 0))
+	check(t, "  and nothing of it stays registered", equal("entries", p.registered(), 0))
 }
 
 // TestUp_WaitsForAServiceStartingAlready checks that up says what it waits
@@ -298,7 +298,7 @@ func TestProjectName_FromAnywhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(t, "  put back, -p NAME down elsewhere exits 0", run(elsewhere, nil, sc, "-p", p.name, "down").ok())
-	check(t, "  and unregisters it", equal("links", p.links(), 0))
+	check(t, "  and unregisters it", equal("entries", p.registered(), 0))
 	check(t, "-p with no such project is refused", run(elsewhere, nil, sc, "-p", p.name, "ps").says("no project "+p.name+" is registered"))
 }
 

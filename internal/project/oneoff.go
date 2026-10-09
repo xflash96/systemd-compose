@@ -245,7 +245,7 @@ const (
 func scratchPrefix(kind string) string { return fmt.Sprintf("%s-%d-", kind, os.Getpid()) }
 
 // scratchPath is where scratchDir keeps the files, and the projects' locks.
-func scratchPath() string { return filepath.Join(runtimeDir(), "systemd-compose") }
+func scratchPath() string { return systemd.RuntimeDir() }
 
 // scratchDir is this user's private directory for the files a run keeps
 // while it works. A run killed before it cleans up leaves them behind;
@@ -619,13 +619,6 @@ func envFileQuote(v string) string {
 }
 
 // runtimeDir is this user's runtime directory.
-func runtimeDir() string {
-	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
-		return d
-	}
-	return filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
-}
-
 func terminal(f *os.File) bool {
 	st, err := f.Stat()
 	return err == nil && st.Mode()&os.ModeCharDevice != 0

@@ -226,9 +226,9 @@ func noChange(r result, name string) error {
 	return nil
 }
 
-// links counts the links in the user manager's unit directory that are
-// the project's.
-func (p *project) links() int {
+// registered counts the project's entries in the user manager's unit
+// directory: copies, or links under registration: link.
+func (p *project) registered() int {
 	entries, _ := os.ReadDir(unitDir)
 	n := 0
 	for _, e := range entries {

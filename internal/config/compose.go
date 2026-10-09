@@ -148,7 +148,7 @@ func composeForms(m *mapNode, ctx string) []finding {
 func composeHealthcheck(m *mapNode, ctx string) []finding {
 	var found []finding
 	if dn := m.get("disable"); dn != nil {
-		found = append(found, finding{dn.Line, fmt.Sprintf("line %d: %s: healthcheck: disable: %s", dn.Line, ctx, noHealthcheck)})
+		found = append(found, finding{dn.Line, fmt.Sprintf("line %d: %s: healthcheck: disable: compose's %s", dn.Line, ctx, noHealthcheck)})
 	}
 	if tn := m.get("test"); tn != nil {
 		if why := composeTest(tn); why != "" {
@@ -159,8 +159,8 @@ func composeHealthcheck(m *mapNode, ctx string) []finding {
 }
 
 // noHealthcheck answers compose's ways to turn a healthcheck off, which
-// are for an image's own.
-const noHealthcheck = "compose's turns off an image's healthcheck; here, leave out the healthcheck: key"
+// are for an image's own: disable: and test: [NONE].
+const noHealthcheck = "turns off an image's healthcheck; here, leave out the healthcheck: key"
 
 // composeTest answers compose's forms of test:, which is the probe's argv
 // here, run without a shell; "" for a test: in this tool's form.

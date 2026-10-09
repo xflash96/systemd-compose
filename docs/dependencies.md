@@ -2,8 +2,8 @@
 
 `depends_on:` orders a project's services and ties them together.
 `healthcheck:` decides when a service counts as started, so that its
-dependents start after it is ready, and then keeps checking it. [examples/webapp](../examples/webapp)
-uses both.
+dependents start after it is ready, and then keeps checking it.
+[examples/webapp](../examples/webapp) uses both.
 
 ## depends_on
 
