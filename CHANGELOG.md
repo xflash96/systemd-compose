@@ -2,7 +2,7 @@
 
 Each release of systemd-compose, newest first.
 
-## Unreleased
+## v0.1.1
 
 - A project name may contain `-`. Units spell it `\x2d`, as
   `systemd-escape` does: project `my-app` has `my\x2dapp-api.service`
