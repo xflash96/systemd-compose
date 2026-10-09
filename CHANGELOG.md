@@ -2,6 +2,13 @@
 
 Each release of systemd-compose, newest first.
 
+## Unreleased
+
+- A project name may contain `-`. Units spell it `\x2d`, as
+  `systemd-escape` does: project `my-app` has `my\x2dapp-api.service`
+  and `my\x2dapp.slice`. A directory named `my-app` still gives the name
+  `my_app`.
+
 ## v0.1.0
 
 The first release of systemd-compose: run a project's services as systemd

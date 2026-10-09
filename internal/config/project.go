@@ -311,16 +311,17 @@ func lineOf(msg string) int {
 // projectName is the one rule for a project name, wherever it comes from.
 func projectName(s, where string) error {
 	if !reProjectName.MatchString(s) {
-		return fmt.Errorf("%s %q: a project name may only contain letters, digits and _ (no dash: - is systemd's slice separator and makes <project>-<service> ambiguous)", where, s)
+		return fmt.Errorf("%s %q: a project name may only contain letters, digits, _ and -, and does not start with -", where, s)
 	}
-	if len(s) > maxProjectName {
-		return fmt.Errorf("%s %s...: a project name is %d characters at most (it is %d): a unit name stops at 255 bytes, and a one-off's, build-NAME-PID-STEP.service, adds 27", where, s[:40], maxProjectName, len(s))
+	if n := len(EscapeName(s)); n > maxProjectName {
+		return fmt.Errorf("%s %s...: a project name is %d characters at most, a - counting 4 (it is %d): a unit name stops at 255 bytes, and a one-off's, build-NAME-PID-STEP.service, adds 27", where, s[:40], maxProjectName, n)
 	}
 	return nil
 }
 
 // maxProjectName keeps every unit name under systemd's 255 bytes, a
-// one-off's too, which systemd would refuse with a bare line.
+// one-off's too, which systemd would refuse with a bare line. It bounds
+// the name as units spell it (EscapeName).
 const maxProjectName = 200
 
 // Service finds a service by name; nil when there is none.

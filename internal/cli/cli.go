@@ -214,7 +214,8 @@ func yamlGone(m *systemd.Manager) {
 		render := filepath.Join(dir, config.RenderDirName)
 		for _, e := range entries {
 			if target, err := os.Readlink(filepath.Join(unitDir, e.Name())); err == nil && filepath.Dir(target) == render {
-				name, _, _ := strings.Cut(strings.TrimSuffix(e.Name(), filepath.Ext(e.Name())), "-")
+				prefix, _, _ := strings.Cut(strings.TrimSuffix(e.Name(), filepath.Ext(e.Name())), "-")
+				name := config.UnescapeName(prefix)
 				fmt.Printf("note: project %s is registered from %s, whose %s is gone: put it back and run down there, or see README, \"Moving or deleting a project\"; this verb acts on the user instance\n", name, dir, config.ConfigFileName)
 				return
 			}

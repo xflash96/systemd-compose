@@ -28,7 +28,10 @@
 
 # name: the project's name, the prefix of every unit
 # - optional, default: the directory's name
-# - letters, digits and _; no dash; at most 200 characters
+# - letters, digits, _ and -, not starting with -; at most 200 characters,
+#   each - counting 4: units spell it \x2d (my-app's api is
+#   my\x2dapp-api.service), as systemd-escape does
+# - the directory's name takes _ for anything else: my-app gives my_app
 # - -p NAME, or SYSTEMD_COMPOSE_PROJECT_NAME in the environment or in the
 #   .env beside this file, overrides it
 name: bookshelf

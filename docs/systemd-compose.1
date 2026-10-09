@@ -80,11 +80,33 @@ in the yaml
 .IP 5. 4
 the directory's name
 .PP
-A name may not contain a dash.
+A name is letters, digits,
+.B _
+and
+.BR \- ,
+and does not start with
+.BR \- .
+Units spell each
+.B \-
+of the name as
+.BR \e\ex2d ,
+as
+.BR systemd\-escape (1)
+writes it: project
+.B my\-app
+has
+.B my\e\ex2dapp\-web.service
+and
+.BR my\e\ex2dapp.slice .
+A name is at most 200 characters, each
+.B \-
+counting 4.
 A directory named
-.B my-app
+.B my\-app
 gives the name
-.BR my_app .
+.BR my_app ;
+.B name: my\-app
+keeps the dash.
 .SS Profiles
 A service with
 .B profiles:

@@ -139,6 +139,40 @@ services:
 	check(t, "  down of the project named run exits 0", rn.sc("down").ok())
 }
 
+// A dashed project name is escaped in its units, as systemd-escape writes
+// it. Unescaped, project NAME-kit's web would be project NAME's kit-web,
+// and its slice would sit inside NAME.slice, so NAME's down would stop it.
+func TestNames_DashedProject(t *testing.T) {
+	plain := newProject(t, "plain", "", `name: NAME
+services:
+  kit-web: {command: [sleep, infinity]}
+`)
+	dashed := newProject(t, "dashed", "", `name: NAME-kit
+services:
+  web: {command: [sleep, infinity]}
+`)
+	esc := plain.name + `\x2dkit`
+	check(t, "up of a dashed project", dashed.sc("up").ok())
+	check(t, "  runs NAME\\x2dkit-web.service", active(esc+"-web.service"))
+	cg := property(esc+".slice", "ControlGroup")
+	check(t, "  in a slice of its own, not inside NAME.slice", that(strings.HasSuffix(cg, "/"+esc+".slice") && !strings.Contains(cg, "/"+plain.name+".slice/"), "ControlGroup %s", cg))
+	check(t, "up of project NAME, whose kit-web had the same unit name before", plain.sc("up").ok())
+	check(t, "  runs its own", active(plain.unit("kit-web", ".service")))
+	check(t, "ls shows the dashed name as written", run("", nil, sc, "ls").shows(regexp.QuoteMeta(plain.name+"-kit")+` +running 1/1 `))
+	check(t, "a one-off in the dashed project", dashed.sc("run", "-T", "web", "echo", "one-off ran").shows("one-off ran"))
+	check(t, "down of project NAME", plain.sc("down").ok())
+	check(t, "  leaves the dashed project running", active(esc+"-web.service"))
+	check(t, "down of the dashed project", dashed.sc("down").ok())
+	entries, _ := os.ReadDir(unitDir)
+	left := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), esc) {
+			left++
+		}
+	}
+	check(t, "  leaves no link", equal("links", left, 0))
+}
+
 // A verb given service names fails when one was skipped as not
 // registered; stop and kill fail only for a name that runs but is not the
 // project's, and leave it running.

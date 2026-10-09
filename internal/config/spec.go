@@ -110,7 +110,7 @@ func orList(words []string) string {
 
 // Names and sizes.
 const (
-	projectNamePattern = `^[A-Za-z0-9_]+$`
+	projectNamePattern = `^[A-Za-z0-9_][A-Za-z0-9_-]*$` // as a service name's
 	serviceNamePattern = `^[A-Za-z0-9_][A-Za-z0-9_-]*$` // a leading - would read as a flag on the command line
 	profilePattern     = `^[A-Za-z0-9][A-Za-z0-9_.-]*$`
 	directivePattern   = `^[A-Za-z][A-Za-z0-9]*$`
@@ -243,7 +243,7 @@ var serviceMap = Form{Kind: Object, Extensions: true, RequireAny: []string{"comm
 
 // Spec is the whole file.
 var Spec = Form{Kind: Object, Extensions: true, Keys: []Key{
-	{Name: "name", Doc: "The project's name, the prefix of every unit. Letters, digits and _, no dash. Default: the directory's name. -p NAME and SYSTEMD_COMPOSE_PROJECT_NAME override it.", Forms: []Form{{Kind: Text, Pattern: projectNamePattern, MaxLen: maxProjectName}, interpolated}},
+	{Name: "name", Doc: "The project's name, the prefix of every unit. Letters, digits, _ and -, not starting with -; at most 200 characters, a - counting 4 (units spell it \\x2d). Default: the directory's name, with _ for anything else. -p NAME and SYSTEMD_COMPOSE_PROJECT_NAME override it.", Forms: []Form{{Kind: Text, Pattern: projectNamePattern, MaxLen: maxProjectName}, interpolated}},
 	{Name: "resources", Doc: "A cap on the whole project, on its slice. A change applies in place and restarts nothing.", Forms: []Form{resourcesMap}},
 	{Name: "services", Required: true, Doc: "The services, by name. Each becomes PROJECT-NAME.service.", Forms: []Form{{Kind: Map, MinLen: 1, Pattern: serviceNamePattern, Items: []Form{serviceMap}}}},
 }}

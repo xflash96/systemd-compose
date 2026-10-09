@@ -184,6 +184,11 @@ The name is the first of: `-p NAME` before the verb,
 `SYSTEMD_COMPOSE_PROJECT_NAME` in the environment or in the `.env`, `name:`
 in the yaml, and the directory's name.
 
+A name is letters, digits, `_` and `-`. Units spell a `-` of the name as
+`\x2d`, as `systemd-escape` does: project `my-app` has
+`my\x2dapp-api.service`. A directory named `my-app` gives the name
+`my_app`; `name: my-app` keeps the dash.
+
 Renaming a project leaves the old units running. Take them down under the
 old name first: `sc -p OLDNAME down`.
 
@@ -219,12 +224,13 @@ CI tests it on systemd 249 (Ubuntu 22.04) and 255 (Ubuntu 24.04).
 
 Take a project down before you move or delete its directory. Its units are
 registered from files inside it. If you have moved it already, move it back
-and run `down` there, or remove the units by hand (`NAME` is the project
-name, as `sc ls` shows it):
+and run `down` there, or remove the units by hand. Set `N` to the project
+name as `sc ls` shows it, with each `-` written `\x2d`:
 
 ```
-systemctl --user stop 'NAME[.-]*'
-rm ~/.config/systemd/user/NAME[.-]* ~/.config/systemd/user/default.target.wants/NAME.target
+N='my\x2dapp'
+systemctl --user stop "$N[.-]*"
+rm ~/.config/systemd/user/"$N"[.-]* ~/.config/systemd/user/default.target.wants/"$N".target
 systemctl --user daemon-reload
 ```
 

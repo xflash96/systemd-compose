@@ -184,14 +184,14 @@
       "anyOf": [
         {
           "maxLength": 200,
-          "pattern": "^[A-Za-z0-9_]+$",
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]*$",
           "type": "string"
         },
         {
           "$ref": "#/definitions/interpolated"
         }
       ],
-      "description": "The project's name, the prefix of every unit. Letters, digits and _, no dash. Default: the directory's name. -p NAME and SYSTEMD_COMPOSE_PROJECT_NAME override it."
+      "description": "The project's name, the prefix of every unit. Letters, digits, _ and -, not starting with -; at most 200 characters, a - counting 4 (units spell it \\x2d). Default: the directory's name, with _ for anything else. -p NAME and SYSTEMD_COMPOSE_PROJECT_NAME override it."
     },
     "resources": {
       "$ref": "#/definitions/resourcesMap",

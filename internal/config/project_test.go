@@ -28,7 +28,8 @@ func TestLoad_RefusesWhatHasNoFaithfulForm(t *testing.T) {
 		{"a docker port mapping in listen", `services: {a: {command: x, listen: "8080:80"}}`, "docker port mapping"},
 		{"a tab in the indentation", "services:\n\ta: {command: x}", "line 2: a tab in the indentation"},
 		{"indented too deep", "services:\n  a:\n    command: x\n      oneshot: true", "look below it"},
-		{"dashed project name", "name: my-proj\nservices: {a: {command: x}}", "no dash"},
+		{"project name led by a dash", "name: -proj\nservices: {a: {command: x}}", "does not start with -"},
+		{"dotted project name", "name: my.proj\nservices: {a: {command: x}}", "letters, digits, _ and -"},
 		{"bad service name", "services: {a.b: {command: x}}", "service name"},
 		{"missing command", "services: {a: {working_dir: .}}", "command: is required"},
 		{"prefix char", "services: {a: {command: -node x}}", "starts with a character"},
@@ -214,8 +215,32 @@ func TestLoad_TakesTheProjectNameFromEachSource(t *testing.T) {
 	if p, _ = Load(path, Options{Name: "from_flag"}); p.Name != "from_flag" || p.NameFrom != "-p" {
 		t.Errorf("-p -> %s from %s", p.Name, p.NameFrom)
 	}
-	if _, err := Load(path, Options{Name: "no-dash"}); err == nil || !strings.Contains(err.Error(), "from -p") {
-		t.Errorf("dashed -p should be refused, got %v", err)
+	if p, err := Load(path, Options{Name: "my-kit"}); err != nil || p.Name != "my-kit" {
+		t.Errorf("a dashed -p: %v", err)
+	}
+	if _, err := Load(path, Options{Name: "my.kit"}); err == nil || !strings.Contains(err.Error(), "from -p") {
+		t.Errorf("a dotted -p should be refused, got %v", err)
+	}
+}
+
+// A project's dashes are escaped in every unit it names, as systemd-escape
+// writes them: a dash would nest my-app.slice inside my.slice, and project
+// my-app's api would read as project my's app-api.
+func TestUnitNames_EscapeTheProjectsDashes(t *testing.T) {
+	p, err := loadYAML(t, "name: my-app\nservices:\n  app-api: {command: /bin/true, schedule: daily}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(p.UnitNames(), " ")
+	want := `my\x2dapp.slice my\x2dapp-app-api.service my\x2dapp-app-api.timer my\x2dapp.target`
+	if got != want {
+		t.Errorf("units %s, want %s", got, want)
+	}
+	if p.LogIdentifier(p.Service("app-api")) != `my\x2dapp-app-api` {
+		t.Errorf("log identifier %s", p.LogIdentifier(p.Service("app-api")))
+	}
+	if n := UnescapeName(EscapeName("a-b-c")); n != "a-b-c" {
+		t.Errorf("round trip: %s", n)
 	}
 }
 
@@ -322,6 +347,11 @@ func TestLoad_RefusesANameTooLongForAUnit(t *testing.T) {
 	}
 	if _, err := loadYAML(t, "name: "+strings.Repeat("a", maxProjectName)+"\nservices:\n  a: {command: /bin/true}\n"); err != nil {
 		t.Errorf("a %d-character name: %v", maxProjectName, err)
+	}
+	// a dash counts as the four bytes units spell it with
+	dashes := strings.Repeat("a-", maxProjectName/5) + "a"
+	if _, err := loadYAML(t, "name: "+dashes+"\nservices:\n  a: {command: /bin/true}\n"); err == nil || !strings.Contains(err.Error(), "a - counting 4") {
+		t.Errorf("a %d-character name of %d escaped: %v", len(dashes), len(EscapeName(dashes)), err)
 	}
 	if n := len("build-" + strings.Repeat("a", maxProjectName) + "-4194304-9999.service"); n > 255 {
 		t.Errorf("the longest one-off name is %d bytes", n)

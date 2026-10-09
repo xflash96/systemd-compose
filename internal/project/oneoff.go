@@ -455,12 +455,16 @@ func oneOffOutcome(err error, reachable func() error) error {
 }
 
 // oneOffPrefix starts the name of this project's one-off units of a kind
-// (run, build): <kind>-<project>-<pid>.
-func (pr *project) oneOffPrefix(kind string) string { return kind + "-" + pr.p.Name + "-" }
+// (run, build): <kind>-<project>-<pid>, the project spelt as in its units.
+func (pr *project) oneOffPrefix(kind string) string {
+	return kind + "-" + config.EscapeName(pr.p.Name) + "-"
+}
 
 // oneOffs are this project's run and build units still loaded: a one-off
 // whose client went away while it ran.
 func (pr *project) oneOffs() ([]string, error) {
+	// systemd matches these with FNM_NOESCAPE: the \ of an escaped dash
+	// is a plain character
 	out, err := pr.m.Cmd("systemctl", "list-units", "--all", "--plain", "--no-legend", "--full", pr.oneOffPrefix("run")+"*", pr.oneOffPrefix("build")+"*").Output()
 	if err != nil {
 		return nil, systemd.CmdErr("systemctl list-units", err)

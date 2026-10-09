@@ -97,7 +97,9 @@ func TestSchema_AgreesWithTheParser(t *testing.T) {
 		// the top level
 		{"services: {a: {command: /bin/true}}", true},
 		{"name: web_1\nservices: {a: {command: /bin/true}}", true},
-		{"name: web-1\nservices: {a: {command: /bin/true}}", false},
+		{"name: web-1\nservices: {a: {command: /bin/true}}", true},
+		{"name: -web\nservices: {a: {command: /bin/true}}", false},
+		{"name: web.1\nservices: {a: {command: /bin/true}}", false},
 		{"x-base: {restart: always}\nservices: {a: {command: /bin/true}}", true},
 		{"version: '3'\nservices: {a: {command: /bin/true}}", false},
 		{"networks: {}\nservices: {a: {command: /bin/true}}", false},

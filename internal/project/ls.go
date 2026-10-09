@@ -52,8 +52,8 @@ func List(m *systemd.Manager) error {
 		name, where, service := m.Project, m.Config, m.Service
 		gone := err != nil || name == ""
 		if gone {
-			// No marker to read: the unit's own name says the project (a
-			// project name has no dash) and the service (after the dash).
+			// No marker to read: the unit's own name says the project (up
+			// to the first dash, as its dashes are escaped) and the service.
 			dir := filepath.Dir(filepath.Dir(target))
 			why := "files unreadable"
 			switch {
@@ -65,6 +65,7 @@ func List(m *systemd.Manager) error {
 				why = "directory gone; README, \"Moving or deleting a project\""
 			}
 			name, service, _ = strings.Cut(strings.TrimSuffix(e.Name(), filepath.Ext(e.Name())), "-")
+			name = config.UnescapeName(name)
 			where = dir + " (" + why + ")"
 		}
 		k := name + "\x00" + where

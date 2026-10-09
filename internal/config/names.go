@@ -1,13 +1,26 @@
 package config
 
+import "strings"
+
+// EscapeName is a project name as its units spell it: each - as \x2d, as
+// systemd-escape writes it. In a unit name a - nests slices (my-app.slice
+// sits inside my.slice, so stopping my would stop my-app) and would make
+// <project>-<service> ambiguous; escaped, the first - ends the project.
+func EscapeName(name string) string { return strings.ReplaceAll(name, "-", `\x2d`) }
+
+// UnescapeName is the project name an escaped unit prefix spells.
+func UnescapeName(prefix string) string { return strings.ReplaceAll(prefix, `\x2d`, "-") }
+
 // TargetName is the project's target: up starts it, and boot starts it.
-func (p *Project) TargetName() string { return p.Name + ".target" }
+func (p *Project) TargetName() string { return EscapeName(p.Name) + ".target" }
 
 // SliceName is the project's slice: the cgroup every service runs in.
-func (p *Project) SliceName() string { return p.Name + ".slice" }
+func (p *Project) SliceName() string { return EscapeName(p.Name) + ".slice" }
 
 // UnitName is the one spelling of <project>-<service><suffix>.
-func (p *Project) UnitName(service, suffix string) string { return p.Name + "-" + service + suffix }
+func (p *Project) UnitName(service, suffix string) string {
+	return EscapeName(p.Name) + "-" + service + suffix
+}
 
 // LogIdentifier is the tag every line a service prints carries in the
 // journal (SyslogIdentifier=): PROJECT-SERVICE, unless the service's unit:
