@@ -11,6 +11,7 @@ Each release of systemd-compose, newest first.
 - `help` works offline, with no man page installed (`go install` installs
   none): `help VERB` prints the manual's entry for the verb, flags and
   all, `help yaml` every key of the file, and `help man` the whole manual.
+  `help` alone lists the verbs, one line each.
 - `import UNIT` prints a `systemd-compose.yaml` that runs a unit you wrote
   by hand as a project's service, and the commands that retire the unit.
 - `registration: copy` registers copies of the units instead of links to

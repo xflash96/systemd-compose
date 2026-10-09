@@ -18,80 +18,40 @@ import (
 
 const help = `systemd-compose — docker-compose verbs over systemd.
 
-  systemd-compose [--system|-s|--user] [-f FILE] [-p NAME] [--profile NAME]... VERB [ARGS...]
-  systemd-compose help VERB       (or VERB --help) one verb, from the manual
-  systemd-compose help yaml       every key of systemd-compose.yaml, with its rules
-  systemd-compose help man        the whole manual (the man page, if it is not installed)
+  systemd-compose [--system|-s|--user] [-f FILE] [-p NAME] [--profile NAME]...
+                  VERB [ARGS...]
 
-INSIDE A PROJECT (a systemd-compose.yaml here or in any parent directory, as
-compose finds its file, or the one -f names) every verb is scoped to it, on
-the user instance; --system is refused. The project NAME is the namespace:
-every unit, the target and the slice carry it. It comes from, in order: -p
-NAME, the SYSTEMD_COMPOSE_PROJECT_NAME variable in the environment, the same
-variable in a .env beside the yaml, name: in the yaml, the directory's name.
-A service with profiles: runs only when one of them is active: --profile
-NAME (repeatable), else SYSTEMD_COMPOSE_PROFILES (comma list) from the
-environment or the .env; * is all. down and stop take every profile.
-
-  up [--dry-run] [--build] [--force] [--force-recreate|--no-recreate] [--wait-timeout T]
-                           render, verify, build what creates: says is
-                           missing, register and start the project;
-                           restart what changed (on_change: start-only warns);
-                           exits 1 naming any unit that failed to start;
-                           --force-recreate restarts every running service,
-                           --no-recreate none; --force retires active orphans;
-                           --build runs every build:, creates: or not;
-                           --dry-run prints the plan (and any refusal) and stops;
-                           --wait-timeout T watches a restarting service for T
-  down                     stop and unregister every unit, and retire what an
-                           older yaml left registered; the current files stay
-  ps                       the project's units and their state
-  logs [-f] [--tail N] [--since T] [-t] [--no-log-prefix] [--no-color] [SERVICE...]
-                           the project's journal; no SERVICE = all of it
-  start|stop|restart [SERVICE...]   run state only; no SERVICE = all; each
-                           says what started or stopped, dependents too
-  kill [-s SIGNAL] SERVICE...  signal the service's processes; SIGTERM unless
-                           -s says otherwise (compose's kill sends SIGKILL:
-                           -s KILL)
-  list-timers              (systemctl's) when each of the project's
-                           scheduled jobs runs next
-  build [SERVICE...]       run build: steps in the service's own environment
-  run [-e KEY=VAL] [-w DIR] [-T] SERVICE [CMD...]
-                           a one-off command in the service's environment
-                           (no CMD: the service's own); exec needs a CMD
-  config                   the yaml, then every unit as it would be rendered
-  top [SERVICE]            systemd-cgtop on the project slice, or on one service
-  VERB [SERVICE...]        systemctl --user VERB, each service name mapped to
-                           its unit; a scheduled job's is its timer (status,
-                           cat, reset-failed: its run's unit too; is-failed:
-                           only that); one that would take the whole
-                           instance with no name (status, reset-failed...)
-                           needs one, and one that changes units (reset-failed,
-                           freeze, clean...) takes this project's services only;
-                           enable, disable, reenable, mask and preset are
-                           refused (up and down own the registration)
+INSIDE A PROJECT (a systemd-compose.yaml here or above, or -f FILE):
+  up                       register and start the project; restart what changed
+  down                     stop and unregister the project
+  ps                       its units and their state
+  logs [SERVICE...]        its journal
+  start|stop|restart [SERVICE...]   change the run state only
+  kill SERVICE...          signal a service's processes
+  build [SERVICE...]       run the services' build: steps
+  run|exec SERVICE [CMD...]   a one-off command in a service's environment
+  config                   the yaml, then every unit as rendered
+  top [SERVICE]            systemd-cgtop on the project, or on one service
+  VERB [SERVICE...]        another systemctl verb, on the services' units
 
 ANYWHERE:
-
   ls                       every project registered on the user instance
-  import UNIT [SERVICE]    a systemd-compose.yaml that runs a service unit of
-                           yours as a project's service, and the commands
-                           that retire the unit; it changes nothing
+  import UNIT [SERVICE]    a project's yaml for a unit you wrote by hand
   version                  this program's version, then systemd's
 
-OUTSIDE A PROJECT: -p NAME acts on the project registered under NAME, as ls
-lists it, wherever its yaml is. Without it, the same words act on the user
-instance (the system instance when run as root); --system or -s for the
-system instance explicitly, --user for your user instance as root.
-
-  ps [-a] [PATTERN]        list-units --type=service,timer   (-a: stopped too)
-  logs [-f] [UNIT...]      journalctl, one -u per UNIT; no UNIT = the whole journal
+OUTSIDE A PROJECT: -p NAME is the project registered as NAME. Without it, the
+verbs act on the user instance (-s: the system instance):
+  ps [-a] [PATTERN]        its services and timers
+  logs [-f] [UNIT...]      journalctl
   start|stop|restart UNIT...   the same words in systemctl
-  up UNIT...               enable --now: register for boot and start
-  down UNIT...             disable --now: stop and unregister; the file stays
+  up UNIT...               enable --now
+  down UNIT...             disable --now
   config UNIT...           systemctl cat
-  top                      systemd-cgtop on the instance's cgroup subtree
+  top                      systemd-cgtop
   VERB ARGS...             systemctl VERB ARGS
+
+More on a verb: systemd-compose help VERB; the whole manual: help man.
+Every key of systemd-compose.yaml: systemd-compose help yaml.
 `
 
 func run(args []string) error {
