@@ -1,7 +1,8 @@
 #!/bin/bash
 # ci/unit — what needs no systemd: formatting, vet, staticcheck, the test
-# suite under the race detector, and the man page's markup where groff is
-# installed. Needs Go and a C compiler (the race detector's).
+# suite under the race detector, and the man page's markup with groff, which
+# CI must have (help renders the same page). Needs Go and a C compiler (the
+# race detector's).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 unformatted=$(gofmt -l .)
@@ -16,4 +17,7 @@ go test -race -count=1 ./...
 if command -v groff >/dev/null; then
 	warned=$(groff -man -ww -z docs/systemd-compose.1 2>&1)
 	[ -z "$warned" ] || { echo "docs/systemd-compose.1: $warned"; exit 1; }
+elif [ -n "${CI:-}" ]; then
+	echo "ci/unit: no groff on this runner: the man page and help's renderer go unchecked" >&2
+	exit 1
 fi

@@ -56,7 +56,7 @@ environment or the .env; * is all. down and stop take every profile.
   list-timers              (systemctl's) when each of the project's
                            scheduled jobs runs next
   build [SERVICE...]       run build: steps in the service's own environment
-  run [-e K=V] [-w DIR] [-T] SERVICE [CMD...]
+  run [-e KEY=VAL] [-w DIR] [-T] SERVICE [CMD...]
                            a one-off command in the service's environment
                            (no CMD: the service's own); exec needs a CMD
   config                   the yaml, then every unit as it would be rendered

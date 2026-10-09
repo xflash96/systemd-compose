@@ -36,12 +36,19 @@ func Import(m *systemd.Manager, unit, service string) error {
 	if service == "" {
 		service = strings.TrimSuffix(unit, ".service")
 	}
-	if !config.ServiceNameOK(service) {
-		return fmt.Errorf("import: %q is no service name (letters, digits, _ and -, not starting with -); name it: import %s NAME", service, unit)
+	if err := config.CheckServiceName(service); err != nil {
+		return fmt.Errorf("import: %v; name it: import %s NAME", err, unit)
 	}
-	props, err := unitProperties(m, unit, "LoadState", "FragmentPath", "DropInPaths", "TriggeredBy")
+	unitDir, err := m.UnitDir()
 	if err != nil {
 		return err
+	}
+	if l, ok := registered(unitDir, unit); ok {
+		return fmt.Errorf("import: %s is a project's already (%s)", unit, filepath.Dir(filepath.Dir(l.target)))
+	}
+	props, err := m.Properties(unit, "LoadState", "FragmentPath", "DropInPaths", "TriggeredBy")
+	if err != nil {
+		return fmt.Errorf("import: %w", err)
 	}
 	switch props["LoadState"] {
 	case "loaded":
@@ -53,9 +60,6 @@ func Import(m *systemd.Manager, unit, service string) error {
 	fragment := props["FragmentPath"]
 	if fragment == "" {
 		return fmt.Errorf("import: %s has no unit file (a transient or generated unit)", unit)
-	}
-	if real, err := filepath.EvalSymlinks(fragment); err == nil && filepath.Base(filepath.Dir(real)) == config.RenderDirName {
-		return fmt.Errorf("import: %s is a project's already (%s)", unit, filepath.Dir(filepath.Dir(real)))
 	}
 
 	var notes []string
@@ -112,7 +116,6 @@ func Import(m *systemd.Manager, unit, service string) error {
 	fmt.Println("# To move it into a project: put this in the project's systemd-compose.yaml")
 	fmt.Println("# (into one that exists, the service under its services:), then")
 	fmt.Printf("#   systemctl --user disable --now %s\n", unit)
-	unitDir, _ := m.UnitDir()
 	if st, err := os.Lstat(filepath.Join(unitDir, unit)); err == nil && st.Mode().IsRegular() {
 		fmt.Printf("#   rm %s\n", shellWord(filepath.Join(unitDir, unit)))
 	} else {
@@ -368,25 +371,6 @@ func triggerKey(unit string) string {
 		return "give the service listen:, and its other [Socket] settings under unit: Socket:"
 	}
 	return "retire it with the unit, or point it at the new name"
-}
-
-// unitProperties reads properties of a unit from the manager.
-func unitProperties(m *systemd.Manager, unit string, names ...string) (map[string]string, error) {
-	args := []string{"show"}
-	for _, n := range names {
-		args = append(args, "-p", n)
-	}
-	out, err := m.Cmd("systemctl", append(args, "--", unit)...).Output()
-	if err != nil {
-		return nil, fmt.Errorf("import: systemctl show %s: %w", unit, err)
-	}
-	props := map[string]string{}
-	for _, l := range strings.Split(string(out), "\n") {
-		if k, v, ok := strings.Cut(l, "="); ok {
-			props[k] = v
-		}
-	}
-	return props, nil
 }
 
 // importLoads checks the import as up would read and render it, in a

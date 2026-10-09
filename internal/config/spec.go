@@ -118,8 +118,8 @@ func orList(words []string) string {
 
 // Names and sizes.
 const (
-	projectNamePattern = `^[A-Za-z0-9_][A-Za-z0-9_-]*$` // as a service name's
 	serviceNamePattern = `^[A-Za-z0-9_][A-Za-z0-9_-]*$` // a leading - would read as a flag on the command line
+	projectNamePattern = serviceNamePattern
 	profilePattern     = `^[A-Za-z0-9][A-Za-z0-9_.-]*$`
 	directivePattern   = `^[A-Za-z][A-Za-z0-9]*$`
 	memoryPattern      = `^[0-9]*[1-9][0-9]*[KMGT]?$`

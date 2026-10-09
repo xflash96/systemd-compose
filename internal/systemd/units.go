@@ -10,12 +10,13 @@ import (
 )
 
 // Link links unit files where they are, without a reload: up reloads once
-// after all its links.
+// after all its links. --quiet drops systemctl's "Created symlink" line per
+// unit, which up's plan has said already; its errors still print.
 func (m *Manager) Link(paths []string) error {
 	return m.Run(append([]string{"link", "--quiet", "--no-reload"}, paths...)...)
 }
 
-// Enable enables a unit: for a target, boot starts it.
+// Enable enables a unit: for a target, boot starts it. Quiet as Link.
 func (m *Manager) Enable(unit string) error { return m.Run("enable", "--quiet", unit) }
 
 // Start starts the units in one transaction. systemd's own words on a
@@ -49,11 +50,28 @@ func (m *Manager) Start(units, watch []string) (string, error) {
 
 // property is one property of a unit as systemctl show prints it, or "".
 func (m *Manager) property(unit, name string) string {
-	out, err := m.Cmd("systemctl", "show", "-p", name, "--value", unit).Output()
-	if err != nil {
-		return ""
+	props, _ := m.Properties(unit, name)
+	return props[name]
+}
+
+// Properties are properties of one unit, name -> value, as systemctl show
+// prints them.
+func (m *Manager) Properties(unit string, names ...string) (map[string]string, error) {
+	args := []string{"show"}
+	for _, n := range names {
+		args = append(args, "-p", n)
 	}
-	return strings.TrimSpace(string(out))
+	out, err := m.Cmd("systemctl", append(args, "--", unit)...).Output()
+	if err != nil {
+		return nil, CmdErr("systemctl show "+unit, err)
+	}
+	props := map[string]string{}
+	for _, l := range strings.Split(string(out), "\n") {
+		if k, v, ok := strings.Cut(l, "="); ok {
+			props[k] = v
+		}
+	}
+	return props, nil
 }
 
 // Jobs is the manager's queued and running jobs on these units, unit ->

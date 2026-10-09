@@ -20,7 +20,8 @@ With journalctl itself, a service's unit is `PROJECT-SERVICE.service`:
 `journalctl --user -u demo-api.service`. That misses a line printed by a
 child process that exits at once, such as a command in a shell loop,
 because journald cannot tell its unit. `logs` also matches each line's
-tag, `PROJECT-SERVICE`, and shows those lines.
+tag, `PROJECT-SERVICE`, and shows those lines. A `-` in the project name
+is `\x2d` in both: `my\x2dapp-api.service` for project `my-app`.
 
 ## When up fails
 
@@ -54,8 +55,9 @@ demo-api.service        loaded  active  running  ready   linked
 - HEALTH is shown for a service with a healthcheck: `starting`, `ready`
   (the test passed once), `probe failed`, `program exited`, `failed` or
   `restarting`.
-- REGISTERED is `linked` for a service, `enabled` for the target, which
-  boot starts. A scheduled job's timer shows its next run.
+- REGISTERED is `linked` for a service (`copied` with `registration:
+  copy`), `enabled` for the target, which boot starts. A scheduled job's
+  timer shows its next run.
 
 ## Changes that are not applied
 

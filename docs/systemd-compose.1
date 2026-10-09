@@ -14,8 +14,7 @@ systemd-compose \- run a project's services as systemd user units, with docker c
 .I VERB
 .RI [ ARGS ...]
 .br
-.B systemd-compose help
-.RI [ VERB ]
+.B systemd-compose help \fR[\fIVERB\fR|\fByaml\fR|\fBman\fR]
 .SH DESCRIPTION
 .B systemd-compose
 runs a project's services as systemd user units, with the verbs of docker
@@ -89,15 +88,15 @@ and does not start with
 Units spell each
 .B \-
 of the name as
-.BR \e\ex2d ,
+.BR \ex2d ,
 as
 .BR systemd\-escape (1)
 writes it: project
 .B my\-app
 has
-.B my\e\ex2dapp\-web.service
+.B my\ex2dapp\-web.service
 and
-.BR my\e\ex2dapp.slice .
+.BR my\ex2dapp.slice .
 A name is at most 200 characters, each
 .B \-
 counting 4.
@@ -142,7 +141,7 @@ Outside a project, the project registered under
 .IR NAME ,
 wherever its yaml is:
 .B systemd\-compose \-p demo logs \-f
-works from any directory.
+works from any directory outside a project.
 .TP
 .BI \-\-profile " NAME"
 Activate a profile; repeatable;
@@ -526,7 +525,7 @@ and
 need a project.
 .SH THE PROJECT FILE
 .B systemd-compose.yaml
-has four top-level keys:
+has these top-level keys:
 .B name
 (the project name),
 .B resources

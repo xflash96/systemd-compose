@@ -156,13 +156,25 @@ services:
 	check(t, "  runs NAME\\x2dkit-web.service", active(esc+"-web.service"))
 	cg := property(esc+".slice", "ControlGroup")
 	check(t, "  in a slice of its own, not inside NAME.slice", that(strings.HasSuffix(cg, "/"+esc+".slice") && !strings.Contains(cg, "/"+plain.name+".slice/"), "ControlGroup %s", cg))
-	check(t, "up of project NAME, whose kit-web had the same unit name before", plain.sc("up").ok())
+	check(t, "up of project NAME, whose kit-web would share the unit name unescaped", plain.sc("up").ok())
 	check(t, "  runs its own", active(plain.unit("kit-web", ".service")))
 	check(t, "ls shows the dashed name as written", run("", nil, sc, "ls").shows(regexp.QuoteMeta(plain.name+"-kit")+` +running 1/1 `))
 	check(t, "a one-off in the dashed project", dashed.sc("run", "-T", "web", "echo", "one-off ran").shows("one-off ran"))
+	// one left running is found by its unit's name, the project spelt
+	// escaped there too: ps lists it, NAME's down leaves it, its own stops it
+	wait, _ := background(dashed.dir, "timeout", "-s", "KILL", "60", sc, "run", "-T", "web", "sleep", "30")
+	running := func() string { return loaded("run-" + esc + "-") }
+	for i := 0; i < 50 && running() == ""; i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+	check(t, "a one-off left running in the dashed project", that(running() != "", "no run-%s- unit is loaded", esc))
+	check(t, "  ps lists it", dashed.sc("ps").shows(`a one-off .*still running`))
 	check(t, "down of project NAME", plain.sc("down").ok())
 	check(t, "  leaves the dashed project running", active(esc+"-web.service"))
+	check(t, "  and its one-off", that(running() != "", "the dashed project's one-off was stopped"))
 	check(t, "down of the dashed project", dashed.sc("down").ok())
+	check(t, "  stops its one-off", that(running() == "", "still loaded: %s", running()))
+	wait()
 	entries, _ := os.ReadDir(unitDir)
 	left := 0
 	for _, e := range entries {

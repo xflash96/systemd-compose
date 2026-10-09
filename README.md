@@ -97,8 +97,8 @@ go install github.com/xflash96/systemd-compose@latest    # -> $(go env GOPATH)/b
 make install                                            # from a clone: ~/.local/bin, and the man page
 ```
 
-`go install` installs no man page. `sc help man` prints the manual, and
-`sc help yaml` every key, from the binary.
+`go install` installs no man page. `systemd-compose help man` prints the
+manual, and `systemd-compose help yaml` every key, from the binary.
 
 The directory must be on your `PATH`. The examples below use a short alias:
 
@@ -195,9 +195,9 @@ A name is letters, digits, `_` and `-`. Units spell a `-` of the name as
 `my\x2dapp-api.service`. A directory named `my-app` gives the name
 `my_app`; `name: my-app` keeps the dash.
 
-Outside the project's directory, `-p NAME` acts on the project registered
-under that name, as `sc ls` lists it: `sc -p demo logs -f` works from
-anywhere.
+Outside a project (no `systemd-compose.yaml` here or above), `-p NAME`
+acts on the project registered under that name, as `sc ls` lists it:
+`sc -p demo logs -f`.
 
 Renaming a project leaves the old units running. Take them down under the
 old name first: `sc -p OLDNAME down`.
@@ -240,7 +240,7 @@ name as `sc ls` shows it, with each `-` written `\x2d`:
 
 ```
 N='my\x2dapp'
-systemctl --user stop "$N[.-]*"
+systemctl --user stop "${N}[.-]*"
 rm ~/.config/systemd/user/"$N"[.-]* ~/.config/systemd/user/default.target.wants/"$N".target
 systemctl --user daemon-reload
 ```
@@ -270,8 +270,15 @@ sc up
 Or set `registration: copy` in the yaml. `up` then copies the units into
 `~/.config/systemd/user/`, and systemd loads them at boot. A service whose
 files are on the filesystem fails to start until it is mounted; a
-`restart:` with a delay, such as `{policy: always, delay: 10s}`, retries
-it.
+`restart:` with a delay retries it:
+
+```yaml
+registration: copy
+services:
+  api:
+    command: [python3, app.py]
+    restart: {policy: always, delay: 10s}
+```
 
 ## Local changes
 
@@ -297,7 +304,7 @@ under `unit:` as written; `Environment=`, `EnvironmentFile=` and
 commands:
 
 ```
-cd ~/services/foo
+mkdir -p ~/services/foo && cd ~/services/foo
 sc import foo > systemd-compose.yaml
 systemctl --user disable --now foo.service
 rm ~/.config/systemd/user/foo.service

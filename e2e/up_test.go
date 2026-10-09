@@ -288,6 +288,7 @@ func TestRegistration_CopiesLoadWithoutTheProject(t *testing.T) {
 	check(t, "  copies its units", isCopy(unit))
 	check(t, "  and the target's boot link names the copy", equal("wants", wants(), filepath.Join(unitDir, p.name+".target")))
 	check(t, "  ps says copied", p.sc("ps").shows(regexp.QuoteMeta(unit)+` +loaded +active +running +copied`))
+	check(t, "  and import refuses a project's copy", run("", nil, sc, "import", unit).says("is a project's already"))
 
 	away := p.dir + ".away"
 	if err := os.Rename(p.dir, away); err != nil {

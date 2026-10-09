@@ -619,7 +619,7 @@ func (pr *project) apply(pl *upPlan) error {
 	if err := pr.m.ResetFailed(known); err != nil {
 		return err
 	}
-	if err := pr.writeAndLink(pl); err != nil {
+	if err := pr.writeAndRegister(pl); err != nil {
 		return err
 	}
 	pr.removeLeftovers(pl.leftover)
@@ -670,9 +670,10 @@ func (pr *project) apply(pl *upPlan) error {
 }
 
 // runBuilds runs the builds the plan names, in the project's slice and
-// under its limits (sliceProp). So the slice goes first, written, linked
-// and reloaded: registered on a first up (or the first after a down), and
-// loaded with this render's text on any up. Reloading only when the file
+// under its limits (sliceProp). So the slice goes first, written,
+// registered (linked or copied, as registration: says) and reloaded:
+// registered on a first up (or the first after a down), and loaded with
+// this render's text on any up (e2e: "and the build saw the new cap"). Reloading only when the file
 // changed would miss a slice file an interrupted up wrote but never
 // loaded; one reload is small beside a build. A build that then fails
 // leaves the slice so; the next up or down settles it.
@@ -706,7 +707,8 @@ func (pr *project) runBuilds(builds []*config.Service) error {
 	return nil
 }
 
-func (pr *project) writeAndLink(pl *upPlan) error {
+// writeAndRegister writes the render and registers its units.
+func (pr *project) writeAndRegister(pl *upPlan) error {
 	baseline := map[string]bool{}
 	for _, r := range pl.rows {
 		baseline[r.unit] = r.change != changeNoBaseline

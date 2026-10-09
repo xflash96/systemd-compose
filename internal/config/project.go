@@ -254,8 +254,8 @@ func parse(data []byte, abs string, override, from string, vars map[string]strin
 	var problems []string
 	for _, kv := range services.pairs {
 		name := kv.key.Value
-		if !reServiceName.MatchString(name) {
-			problems = append(problems, fmt.Sprintf("line %d: service %q: a service name is letters, digits, _ and -, and does not start with - (a command line would read it as a flag)", kv.key.Line, name))
+		if err := CheckServiceName(name); err != nil {
+			problems = append(problems, fmt.Sprintf("line %d: %v", kv.key.Line, err))
 			continue
 		}
 		svc, err := parseService(name, kv.value, p)
@@ -321,8 +321,13 @@ func lineOf(msg string) int {
 	return n
 }
 
-// ServiceNameOK reports whether name may name a service.
-func ServiceNameOK(name string) bool { return reServiceName.MatchString(name) }
+// CheckServiceName is the one rule for a service name.
+func CheckServiceName(name string) error {
+	if !reServiceName.MatchString(name) {
+		return fmt.Errorf("service %q: a service name is letters, digits, _ and -, and does not start with - (a command line would read it as a flag)", name)
+	}
+	return nil
+}
 
 // projectName is the one rule for a project name, wherever it comes from.
 func projectName(s, where string) error {

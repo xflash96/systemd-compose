@@ -34,7 +34,9 @@ func WriteUnit(path, text string) error {
 	case err != nil && !os.IsNotExist(err):
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".tmp-*") // O_EXCL, a name no one chose
+	// O_EXCL, a name no one chose; a leading dot, which the readers of the
+	// unit directory skip, so a copy half written is never taken for one
+	f, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
 	if err != nil {
 		return err
 	}

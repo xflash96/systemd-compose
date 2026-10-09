@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - name: groff, for the man page's lint and help's renderer test
+        run: command -v groff || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends groff-base; }
       - run: ci/unit
 
   live:

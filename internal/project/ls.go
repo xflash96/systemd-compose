@@ -13,9 +13,10 @@ import (
 	"github.com/xflash96/systemd-compose/internal/systemd"
 )
 
-// List lists every project registered on the user instance: a link
-// into a render directory is a project's unit, and the marker in the file it
-// points at names the project, its yaml and the service the unit belongs to.
+// List lists every project registered on the user instance: a link into a
+// render directory, or a copy of a rendered file (registration: copy), is a
+// project's unit, and the marker in its file names the project, its yaml
+// and the service the unit belongs to.
 // The count is of services, not units: the marker groups a service's units
 // (its socket is not a second service), and the one that stands for it is
 // its timer when it has one, since a job's own service runs only while the
@@ -40,14 +41,14 @@ func List(m *systemd.Manager) error {
 	byKey := map[string]*project{}
 	var keys []string
 	for _, l := range links {
-		target, err := l.target, l.err
 		m := render.ReadMarker(l.text)
 		name, where, service := m.Project, m.Config, m.Service
-		gone := err != nil || name == ""
+		gone := l.err != nil || name == ""
 		if gone {
-			// No marker to read: the unit's own name says the project (up
-			// to the first dash, as its dashes are escaped) and the service.
-			dir := filepath.Dir(filepath.Dir(target))
+			// no marker to read: the unit's own name says the project and
+			// the service
+			err := l.err
+			dir := filepath.Dir(filepath.Dir(l.target))
 			why := "files unreadable"
 			switch {
 			case os.IsNotExist(err) && exists(dir) && !exists(filepath.Join(dir, config.ConfigFileName)):
@@ -57,8 +58,7 @@ func List(m *systemd.Manager) error {
 			case os.IsNotExist(err):
 				why = "directory gone; README, \"Moving or deleting a project\""
 			}
-			name, service, _ = strings.Cut(strings.TrimSuffix(l.name, filepath.Ext(l.name)), "-")
-			name = config.UnescapeName(name)
+			name, service = config.SplitUnitName(l.name)
 			where = dir + " (" + why + ")"
 		}
 		k := name + "\x00" + where

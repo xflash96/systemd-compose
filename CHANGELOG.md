@@ -22,8 +22,8 @@ Each release of systemd-compose, newest first.
   in the yaml's terms: until the test passes or `start_period` runs out,
   and what the service's `restart:` does if it fails.
 - Outside a project, `-p NAME` acts on the project registered under that
-  name, wherever its yaml is, as compose's `-p` does: `sc -p demo logs
-  -f` from any directory.
+  name, wherever its yaml is, as compose's `-p` does: `systemd-compose -p
+  demo logs -f`.
 
 ## v0.1.0
 

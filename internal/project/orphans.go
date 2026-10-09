@@ -258,8 +258,9 @@ func (pr *project) retire(orphans []orphan) error {
 }
 
 // orphans finds units registered from this project's render directory that
-// the yaml no longer declares. Provenance is the link target's directory
-// plus the marker section; a unit that merely shares the name prefix is
+// the yaml no longer declares. Provenance is the render directory a link
+// points into, or a copy's marker names, plus the marker section; a unit
+// that merely shares the name prefix is
 // somebody else's and is never touched. One whose marker names a service
 // still in the yaml is a socket or timer that service shed (shedBy).
 func (pr *project) orphans(unitDir string) ([]orphan, error) {

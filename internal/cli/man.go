@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -16,8 +17,10 @@ var docs Docs
 // manWidth is the width help renders the manual to.
 const manWidth = 80
 
-// renderMan renders roff source, the subset the manual uses, as man would
-// at manWidth: sections, tagged paragraphs, insets, fonts dropped.
+// renderMan renders roff source as man would at manWidth: the man(7)
+// macros a manual like this one uses (sections, tagged paragraphs,
+// insets), fonts dropped. TestRenderMan_SaysWhatGroffSays holds it to
+// groff for this manual.
 func renderMan(src string) string { return renderAt(src, 7) }
 
 // renderAt is renderMan with body text, and tags, starting at column base.
@@ -40,6 +43,7 @@ type roff struct {
 	insets []int    // the bases .RS saved
 	tag    int      // > 0: the next text is a tag, its body at this indent
 	fill   bool
+	tight  bool // .PD 0: no blank line between paragraphs (stacked tags)
 }
 
 func (r *roff) line(l string) {
@@ -58,7 +62,8 @@ func (r *roff) line(l string) {
 	name, rest, _ := strings.Cut(l[1:], " ")
 	args := roffArgs(rest)
 	switch name {
-	case "TH", "PD", "nh", "hy", "ad", "na", "ne", "sp":
+	case "PD":
+		r.tight = len(args) > 0 && args[0] == "0"
 	case "SH", "SS":
 		r.flush()
 		r.insets, r.base, r.indent, r.tag = nil, 7, 7, 0
@@ -180,7 +185,7 @@ func (r *roff) flush() {
 
 func (r *roff) paragraph() {
 	r.flush()
-	if s := r.out.String(); s != "" && !strings.HasSuffix(s, "\n\n") {
+	if s := r.out.String(); s != "" && !r.tight && !strings.HasSuffix(s, "\n\n") {
 		r.out.WriteString("\n")
 	}
 }
@@ -287,11 +292,17 @@ func manEntries(src, verb string) string {
 			continue
 		}
 		entry := []string{".TP", lines[i+1]}
-		d := 0
+		d, body := 0, false
 		for j := i + 2; j < len(lines); j++ {
 			e := lines[j]
-			if d == 0 && (e == ".TP" || strings.HasPrefix(e, ".TP ") || strings.HasPrefix(e, ".SS ") || strings.HasPrefix(e, ".SH ")) {
+			next := e == ".TP" || strings.HasPrefix(e, ".TP ")
+			if d == 0 && (next && body || strings.HasPrefix(e, ".SS ") || strings.HasPrefix(e, ".SH ")) {
 				break
+			}
+			// tags stacked over one body (.PD 0, as run's and exec's): the
+			// entry goes on through them to that body
+			if lines[j-1] != ".TP" && !strings.HasPrefix(lines[j-1], ".TP ") && printsText(e) {
+				body = true
 			}
 			switch {
 			case e == ".RS" || strings.HasPrefix(e, ".RS "):
@@ -304,6 +315,15 @@ func manEntries(src, verb string) string {
 		out = append(out, strings.ToUpper(section)+":", strings.TrimRight(renderAt(strings.Join(entry, "\n"), 2), "\n"), "")
 	}
 	return strings.Join(out, "\n")
+}
+
+// printsText reports a line that prints: text, or a font macro's.
+func printsText(l string) bool {
+	if !strings.HasPrefix(l, ".") {
+		return l != ""
+	}
+	name, _, _ := strings.Cut(l[1:], " ")
+	return slices.Contains([]string{"B", "I", "BR", "RB", "IR", "RI", "BI", "IB", "SM", "SB"}, name)
 }
 
 // tagNames reports whether a .TP's tag line names verb: its first word,

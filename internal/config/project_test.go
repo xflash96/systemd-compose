@@ -239,8 +239,15 @@ func TestUnitNames_EscapeTheProjectsDashes(t *testing.T) {
 	if p.LogIdentifier(p.Service("app-api")) != `my\x2dapp-app-api` {
 		t.Errorf("log identifier %s", p.LogIdentifier(p.Service("app-api")))
 	}
-	if n := UnescapeName(EscapeName("a-b-c")); n != "a-b-c" {
-		t.Errorf("round trip: %s", n)
+	for _, u := range p.UnitNames() {
+		project, service := SplitUnitName(u)
+		want := ""
+		if strings.Contains(u, "-app-api") {
+			want = "app-api"
+		}
+		if project != "my-app" || service != want {
+			t.Errorf("SplitUnitName(%s) = %q, %q; want my-app, %q", u, project, service, want)
+		}
 	}
 }
 

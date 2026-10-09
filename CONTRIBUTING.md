@@ -62,7 +62,9 @@ needs docker 28 or later with cgroup v2.
   `UPDATE_SCHEMA=1 go test ./internal/config -run TestSchema_IsGenerated`
   writes `config-schema.json` again from the spec.
 - A new verb or flag goes into the help text and the man page. A new verb
-  also goes into the README's features.
+  also goes into the README's features. The binary carries the man page and
+  `docs/config.example.yaml`: `help VERB` prints the verb's entry under
+  COMMANDS, and `help yaml` prints the example file as it is.
 - Text for users is plain: one fact per sentence.
 
 ## Releases
@@ -71,6 +73,8 @@ Before 1.0, the middle number goes up only for a change that breaks a yaml
 or a command line that worked before. Anything else, new features too, is
 a release of the last number, such as `v0.1.1`.
 
-A maintainer adds the version's section to `CHANGELOG.md`, then pushes the
-tag, such as `v0.1.1`. CI tests the tag, builds the archives with
-goreleaser, and publishes them with that section as the release notes.
+Changes collect in `CHANGELOG.md` under `## Unreleased`. A maintainer
+renames that heading to the tag exactly, such as `## v0.1.1`, then pushes
+the tag: the release job reads the section by that heading. CI tests the
+tag, builds the archives with goreleaser, and publishes them with that
+section as the release notes.
