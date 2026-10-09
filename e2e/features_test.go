@@ -455,3 +455,60 @@ func waitFile(path string) string {
 	}
 	return ""
 }
+
+// TestHealthcheck_ChecksWhileItRuns checks compose's healthcheck after the
+// start: retries failed checks in a row make ps say unhealthy, with what
+// the last one printed, and logs say so; one pass makes it healthy again.
+// Nothing restarts it for that. The checks run in the service's cgroup and
+// end with it, their state too.
+func TestHealthcheck_ChecksWhileItRuns(t *testing.T) {
+	p := newProject(t, "hw", "hw", "name: NAME\nservices:\n  s:\n    command: [sh, -c, 'trap \"\" HUP; exec sleep infinity']\n"+
+		"    healthcheck: {test: [sh, -c, 'test -f ok || { echo no ok file; echo on two lines; exit 3; }'], interval: 1s, retries: 2, start_interval: 1s}\n")
+	p.file("ok", "")
+	unit := p.unit("s", ".service")
+	row := regexp.QuoteMeta(unit) + ` +loaded +active +running +`
+	psUntil := func(pattern string) error { // checks run each second
+		var r result
+		for end := time.Now().Add(15 * time.Second); time.Now().Before(end); time.Sleep(250 * time.Millisecond) {
+			if r = p.sc("ps"); r.shows(pattern) == nil {
+				return nil
+			}
+		}
+		return r.shows(pattern)
+	}
+	health := filepath.Join(runtimeDir(), "systemd-compose", "health")
+	check(t, "up", p.sc("up").ok())
+	check(t, "  ps says healthy", p.sc("ps").shows(row+`healthy +copied$`))
+	check(t, "  and the run's state is kept", exists(filepath.Join(health, property(unit, "InvocationID"))))
+	cg := "/sys/fs/cgroup" + property(unit, "ControlGroup") + "/cgroup.procs"
+	watches := func() (n int) {
+		data, _ := os.ReadFile(cg)
+		for _, pid := range strings.Fields(string(data)) {
+			if cmd, _ := os.ReadFile("/proc/" + pid + "/cmdline"); strings.Contains(string(cmd), "probe\x00--watch\x00") {
+				n++
+			}
+		}
+		return n
+	}
+	check(t, "  the checks run in the service's cgroup", equal("watches", watches(), 1))
+	pid := mainPID(unit)
+	check(t, "  a HUP sent to the service (its whole cgroup)", p.sc("kill", "-s", "HUP", "s").says("sent SIGHUP"))
+	time.Sleep(time.Second)
+	check(t, "  leaves the checks running", firstErr(equal("watches", watches(), 1), p.sc("ps").shows(row+`healthy +copied$`)))
+
+	os.Remove(p.path("ok"))
+	check(t, "two failed checks in a row: ps says unhealthy, since when, and what the last printed", psUntil(row+`unhealthy +copied \(unhealthy since [0-9:]+: 2 checks failed in a row, the last: exit status 3; its output: no ok file on two lines; `))
+	check(t, "  logs say so", p.sc("logs", "s").says(`probe: unhealthy: 2 checks failed in a row, the last: exit status 3; its output: no ok file on two lines`))
+	check(t, "  and nothing restarted it", equal("MainPID", mainPID(unit), pid))
+	p.file("ok", "")
+	check(t, "one pass: healthy again", psUntil(row+`healthy +copied$`))
+	check(t, "  logs say so", p.sc("logs", "s").says(`probe: healthy again, after [0-9]+ failed checks`))
+
+	before := filepath.Join(health, property(unit, "InvocationID"))
+	check(t, "restart", p.sc("restart", "s").ok())
+	check(t, "  the new run is checked, by one watch", firstErr(p.sc("ps").shows(row+`healthy +copied$`), equal("watches", watches(), 1)))
+	check(t, "  and the last run's state is gone", missing(before))
+	now := filepath.Join(health, property(unit, "InvocationID"))
+	check(t, "stop", p.sc("stop", "s").ok())
+	check(t, "  ends the checks and takes their state along", missing(now))
+}

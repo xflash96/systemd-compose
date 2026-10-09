@@ -185,7 +185,7 @@ func (pr *project) act(verb string, units, flags []string) error {
 			alongside = alongside || verb == "stop"
 		}
 		if svc != nil && svc.Schedule != nil && n == pr.p.TimerUnit(svc) && verb != "stop" {
-			what += " (" + svc.Name + " itself runs when the timer fires; " + pr.cmd() + " run " + svc.Name + " runs it now)"
+			what += " (" + svc.Name + " itself runs when the timer fires; " + pr.cmd() + " run " + svc.Name + " runs it now, on this terminal, and systemctl --user start " + pr.p.ServiceUnit(svc) + " as the timer would, into logs)"
 		}
 		fmt.Printf("  %-32s %s%s\n", n, what, along)
 		printed[n] = true

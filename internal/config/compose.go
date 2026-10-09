@@ -143,14 +143,12 @@ func composeForms(m *mapNode, ctx string) []finding {
 	return found
 }
 
-// composeHealthcheck names a healthcheck's compose forms: the keys with no
-// counterpart, and test:'s prefixes and string form.
+// composeHealthcheck names a healthcheck's compose forms: disable:, and
+// test:'s prefixes and string form.
 func composeHealthcheck(m *mapNode, ctx string) []finding {
 	var found []finding
-	for _, kv := range m.pairs {
-		if why := composeHealthKey(kv.key.Value); why != "" {
-			found = append(found, finding{kv.key.Line, fmt.Sprintf("line %d: %s: healthcheck: %s: %s", kv.key.Line, ctx, kv.key.Value, why)})
-		}
+	if dn := m.get("disable"); dn != nil {
+		found = append(found, finding{dn.Line, fmt.Sprintf("line %d: %s: healthcheck: disable: %s", dn.Line, ctx, noHealthcheck)})
 	}
 	if tn := m.get("test"); tn != nil {
 		if why := composeTest(tn); why != "" {
@@ -160,19 +158,9 @@ func composeHealthcheck(m *mapNode, ctx string) []finding {
 	return found
 }
 
-// composeHealthKey answers compose's healthcheck key k in its terms; "" for
-// a key that is not compose's alone.
-func composeHealthKey(k string) string {
-	switch k {
-	case "retries":
-		return "the probe runs again every interval until start_period has passed (" + Default("healthcheck.start_period") + " unless set); a shorter start_period fails sooner"
-	case "start_interval":
-		return "the probe runs every interval from the start"
-	case "disable":
-		return "leave out the healthcheck: key instead"
-	}
-	return ""
-}
+// noHealthcheck answers compose's ways to turn a healthcheck off, which
+// are for an image's own.
+const noHealthcheck = "compose's turns off an image's healthcheck; here, leave out the healthcheck: key"
 
 // composeTest answers compose's forms of test:, which is the probe's argv
 // here, run without a shell; "" for a test: in this tool's form.
@@ -189,7 +177,7 @@ func composeTest(tn *yaml.Node) string {
 	case "CMD-SHELL":
 		return `compose's "CMD-SHELL x" is [sh, -c, x] here`
 	case "NONE":
-		return `compose's "NONE": leave out the healthcheck: key instead`
+		return `compose's "NONE" ` + noHealthcheck
 	}
 	return ""
 }

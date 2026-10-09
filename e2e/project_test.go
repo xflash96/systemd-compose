@@ -33,7 +33,7 @@ services:
     command: [sh, -c, 'echo "web X=$$X G=$$G RT=$$RT fds=$$LISTEN_FDS"; exec sleep infinity']
     environment: {X: "%s", G: "${GREETING}", RT: "%%t/NAME"}
     listen: "%%t/NAME.sock"
-    healthcheck: {test: [true], interval: 1s}
+    healthcheck: {test: [true], start_interval: 1s}
   job:
     command: [sh, -c, "echo job ran"]
     schedule: "*-*-* 04:00:00"
@@ -74,7 +74,7 @@ func TestProject(t *testing.T) {
 	check(t, "the target is active", active(name+".target"))
 	check(t, "the first up's build ran in the slice", fileMatches(p.path("built"), "/"+name+`\.slice/`))
 	check(t, "a disabled profile is not registered", missing(filepath.Join(unitDir, name+"-debug.service")))
-	check(t, "ps shows HEALTH ready", p.sc("ps").shows(" ready "))
+	check(t, "ps shows HEALTH healthy", p.sc("ps").shows(" healthy "))
 	// the manager's unit directory, not the shell's XDG_CONFIG_HOME, says
 	// what is registered
 	check(t, "ps under another XDG_CONFIG_HOME still sees the project registered",

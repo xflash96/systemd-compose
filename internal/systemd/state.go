@@ -12,13 +12,14 @@ type UnitState struct {
 	Id, LoadState, ActiveState, SubState, UnitFileState string
 	FragmentPath                                        string // the unit file systemd loaded it from; "" for one made on demand
 
-	Started   time.Time // InactiveExitTimestamp: when the current run began; zero if never
-	Ran       time.Time // ExecMainStartTimestamp: when the program last started (after any restart delay)
-	NRestarts int       // automatic restarts since the last start by hand
-	NextRun   string    // a timer's next elapse as systemd prints it (local time); "" for anything else
-	ExitCode  int       // ExecMainCode: 1 exited, 2 killed, 3 dumped; 0 never ran
-	Exit      int       // ExecMainStatus: the exit status, or the signal that killed it
-	Result    string    // why it last stopped or failed: success, exit-code, signal, timeout...
+	Started    time.Time // InactiveExitTimestamp: when the current run began; zero if never
+	Ran        time.Time // ExecMainStartTimestamp: when the program last started (after any restart delay)
+	NRestarts  int       // automatic restarts since the last start by hand
+	NextRun    string    // a timer's next elapse as systemd prints it (local time); "" for anything else
+	ExitCode   int       // ExecMainCode: 1 exited, 2 killed, 3 dumped; 0 never ran
+	Exit       int       // ExecMainStatus: the exit status, or the signal that killed it
+	Result     string    // why it last stopped or failed: success, exit-code, signal, timeout...
+	Invocation string    // InvocationID: the current or last run's, as $INVOCATION_ID has it
 }
 
 // Finished is a oneshot that has run and stays active (RemainAfterExit):
@@ -57,7 +58,7 @@ const showTime = "Mon 2006-01-02 15:04:05.000000 MST"
 
 // States asks systemctl about every unit at once.
 func (m *Manager) States(units []string) (map[string]UnitState, error) {
-	args := append([]string{"show", "--timestamp=us+utc", "-p", "Id,LoadState,ActiveState,SubState,UnitFileState,FragmentPath,InactiveExitTimestamp,ExecMainStartTimestamp,NRestarts,NextElapseUSecRealtime,ExecMainCode,ExecMainStatus,Result"}, units...)
+	args := append([]string{"show", "--timestamp=us+utc", "-p", "Id,LoadState,ActiveState,SubState,UnitFileState,FragmentPath,InactiveExitTimestamp,ExecMainStartTimestamp,NRestarts,NextElapseUSecRealtime,ExecMainCode,ExecMainStatus,Result,InvocationID"}, units...)
 	out, err := m.Cmd("systemctl", args...).Output()
 	if err != nil {
 		return nil, CmdErr("systemctl show", err)
@@ -105,6 +106,8 @@ func parseStates(out string) (map[string]UnitState, error) {
 				s.Exit, _ = strconv.Atoi(v)
 			case "Result":
 				s.Result = v
+			case "InvocationID":
+				s.Invocation = v
 			case "NextElapseUSecRealtime":
 				// Printed in local time without microseconds, whatever
 				// --timestamp says; shown, never compared, so kept as text.

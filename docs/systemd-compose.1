@@ -301,7 +301,11 @@ On a service with
 they act on its timer;
 .B run
 .I SERVICE
-runs the job now.
+runs the job now, on the terminal, and
+.B systemctl \-\-user start
+.I PROJECT\-SERVICE\fB.service\fR
+runs it as the timer would, with its output in
+.BR logs .
 .TP
 .B kill \fR[\fB\-s\fR \fISIGNAL\fR] \fISERVICE\fR...
 Send a signal to the service's processes: SIGTERM, or the one that
@@ -618,8 +622,12 @@ or
 .RB { test ,
 .BR interval ,
 .BR timeout ,
-.BR start_period }:
-a probe that gates the service's start
+.BR retries ,
+.BR start_period ,
+.BR start_interval }:
+a test that gates the service's start, then runs every
+.B interval
+while it runs; ps says healthy or unhealthy
 .TP
 .B oneshot
 a job that ends, which dependents can wait for

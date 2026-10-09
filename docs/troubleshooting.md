@@ -46,15 +46,18 @@ line per service that is not up, with the reason:
 ## ps
 
 ```
-UNIT                    LOAD    ACTIVE  SUB      HEALTH  REGISTERED
-demo-api.service        loaded  active  running  ready   copied
+UNIT                    LOAD    ACTIVE  SUB      HEALTH   REGISTERED
+demo-api.service        loaded  active  running  healthy  copied
 ```
 
 - ACTIVE and SUB are systemd's states. A `oneshot` that has run is
   `active` `exited`.
-- HEALTH is shown for a service with a healthcheck: `starting`, `ready`
-  (the test passed once), `probe failed`, `program exited`, `failed` or
-  `restarting`.
+- HEALTH is shown for a service with a healthcheck: `starting`,
+  `healthy`, `unhealthy` (`retries` checks or more failed in a row;
+  REGISTERED says since when, and what the last one printed), `unchecked`
+  (nothing checks it now, as when an older version started it; REGISTERED
+  says what starts the checks), `probe failed`, `program exited`, `failed`
+  or `restarting`.
 - REGISTERED is `copied` for a service (`linked` with `registration:
   link`), `enabled` for the target, which boot starts. A scheduled job's
   timer shows its next run.

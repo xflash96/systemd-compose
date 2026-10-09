@@ -188,7 +188,8 @@ func TestSchema_AgreesWithTheParser(t *testing.T) {
 		{"services: {a: {command: /bin/true, healthcheck: {interval: 1s}}}", false},
 		{"services: {a: {command: /bin/true, healthcheck: {test: []}}}", false},
 		{"services: {a: {command: /bin/true, healthcheck: {test: /bin/true}}}", false},
-		{"services: {a: {command: /bin/true, healthcheck: {test: [/bin/true], retries: 3}}}", false},
+		{"services: {a: {command: /bin/true, healthcheck: {test: [/bin/true], retries: 3, start_interval: 1s}}}", true},
+		{"services: {a: {command: /bin/true, healthcheck: {test: [/bin/true], retries: 0}}}", false},
 		{"services: {a: {command: /bin/true, healthcheck: {test: [/bin/true], interval: often}}}", false},
 
 		// oneshot, build, resources, listen, profiles

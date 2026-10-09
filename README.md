@@ -25,7 +25,7 @@ the file. [Try it](#try-it) starts with a small one.
 - `up` prints a plan, checks the units with `systemd-analyze verify` first,
   and restarts only the services that changed
   ([when up fails](docs/troubleshooting.md#when-up-fails)).
-- `depends_on` with compose's conditions, healthchecks that gate the start,
+- `depends_on` with compose's conditions, healthchecks that gate the start and keep checking,
   and jobs that run to the end before their dependents start
   ([dependencies and healthchecks](docs/dependencies.md)).
 - Scheduled jobs on systemd timers ([scheduled jobs](docs/scheduled-jobs.md)),
@@ -169,7 +169,7 @@ Each key of a service, with the least it takes:
 | `env_file` | `env_file: app.env` | files of variables, which systemd reads. A value from a file wins over `environment:`. |
 | `restart` | `restart: on-failure` | `no`, `on-failure`, `always` or `unless-stopped` |
 | `depends_on` | `depends_on: [db]` | services to start first, with compose's conditions ([guide](docs/dependencies.md)) |
-| `healthcheck` | `healthcheck: {test: [pg_isready]}` | a test that must pass before the service counts as started ([guide](docs/dependencies.md#healthchecks)) |
+| `healthcheck` | `healthcheck: {test: [pg_isready]}` | a test that must pass before the service counts as started, then runs every interval ([guide](docs/dependencies.md#healthchecks)) |
 | `oneshot` | `oneshot: true` | a job that runs to its end, which other services can wait for ([guide](docs/dependencies.md#jobs-that-run-first)) |
 | `schedule` | `schedule: daily` | a timer that runs the service ([guide](docs/scheduled-jobs.md)) |
 | `build` | `build: {run: [make], creates: app}` | the steps that make the program; `up` runs them when `creates:` is missing |

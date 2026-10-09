@@ -162,9 +162,11 @@ var (
 	}}
 	healthcheckMap = Form{Kind: Object, Keys: []Key{
 		{Name: "test", Required: true, Doc: "The probe's program and its arguments, with no CMD or CMD-SHELL prefix.", Forms: []Form{{Kind: List, MinLen: 1, Items: []Form{{Kind: Scalar}}}}},
-		{Name: "interval", Default: "2s", Doc: "Whole seconds.", Forms: spanForms},
-		{Name: "timeout", Default: "5s", Doc: "Whole seconds.", Forms: spanForms},
-		{Name: "start_period", Default: "60s", Doc: "How long the probe keeps trying. Whole seconds.", Forms: spanForms},
+		{Name: "interval", Default: "30s", Doc: "Between checks once the service has started. Whole seconds.", Forms: spanForms},
+		{Name: "timeout", Default: "5s", Doc: "How long one check may run. Whole seconds.", Forms: spanForms},
+		{Name: "retries", Default: "3", Doc: "Checks failed in a row that make a started service unhealthy.", Forms: []Form{{Kind: Integer, Bounded: true, Min: 1}, interpolated}},
+		{Name: "start_period", Default: "60s", Doc: "How long the start waits for a check to pass. Whole seconds.", Forms: spanForms},
+		{Name: "start_interval", Default: "2s", Doc: "Between checks while the service starts. Whole seconds.", Forms: spanForms},
 	}}
 	buildMap = Form{Kind: Object, Keys: []Key{
 		{Name: "run", Required: true, Doc: "The steps, one command each, with no shell.", Forms: []Form{{Kind: List, MinLen: 1, Items: []Form{{Kind: Text, MinLen: 1}}}}},
@@ -236,7 +238,7 @@ var serviceMap = Form{Kind: Object, Extensions: true, RequireAny: []string{"comm
 	{Name: "schedule", Doc: "A timer that starts the service as a oneshot: an OnCalendar= expression, or the map form.", Forms: []Form{{Kind: Text, MinLen: 1}, scheduleMap}},
 	{Name: "unit", Doc: "Raw systemd sections, merged into the unit last. A directive a key above writes is an error.", Forms: []Form{unitMap}},
 	{Name: "on_change", Default: "restart", Doc: "restart: up restarts the service when it changes. start-only: up only starts it when it is down.", Forms: []Form{onChange, interpolated}},
-	{Name: "healthcheck", Doc: "A readiness probe: the service counts as started once test: passes.", Forms: []Form{healthcheckMap}},
+	{Name: "healthcheck", Doc: "A test the service must pass to count as started, then run every interval: retries failed in a row make it unhealthy (ps, logs). Nothing restarts it for that, as in compose.", Forms: []Form{healthcheckMap}},
 	{Name: "oneshot", Doc: "Type=oneshot with RemainAfterExit=yes: the service counts as started once it has exited 0.", Forms: boolean},
 	{Name: "build", Doc: "Steps up runs before it starts the service, not rendered.", Forms: []Form{buildMap}},
 	{Name: "resources", Doc: "This service's caps.", Forms: []Form{resourcesMap}},

@@ -380,15 +380,31 @@
           },
           "healthcheck": {
             "additionalProperties": false,
-            "description": "A readiness probe: the service counts as started once test: passes.",
+            "description": "A test the service must pass to count as started, then run every interval: retries failed in a row make it unhealthy (ps, logs). Nothing restarts it for that, as in compose.",
             "properties": {
               "interval": {
                 "$ref": "#/definitions/spanForms",
-                "description": "Whole seconds. Default: 2s."
+                "description": "Between checks once the service has started. Whole seconds. Default: 30s."
+              },
+              "retries": {
+                "anyOf": [
+                  {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "$ref": "#/definitions/interpolated"
+                  }
+                ],
+                "description": "Checks failed in a row that make a started service unhealthy. Default: 3."
+              },
+              "start_interval": {
+                "$ref": "#/definitions/spanForms",
+                "description": "Between checks while the service starts. Whole seconds. Default: 2s."
               },
               "start_period": {
                 "$ref": "#/definitions/spanForms",
-                "description": "How long the probe keeps trying. Whole seconds. Default: 60s."
+                "description": "How long the start waits for a check to pass. Whole seconds. Default: 60s."
               },
               "test": {
                 "description": "The probe's program and its arguments, with no CMD or CMD-SHELL prefix.",
@@ -404,7 +420,7 @@
               },
               "timeout": {
                 "$ref": "#/definitions/spanForms",
-                "description": "Whole seconds. Default: 5s."
+                "description": "How long one check may run. Whole seconds. Default: 5s."
               }
             },
             "required": [

@@ -197,13 +197,13 @@ services:
   ready:
     command: ./tool
     restart: {policy: on-failure, delay: 1s}
-    healthcheck: {test: [sh, -c, 'exit 1'], interval: 1s, timeout: 1s, start_period: 2s}
+    healthcheck: {test: [sh, -c, 'exit 1'], start_interval: 1s, timeout: 1s, start_period: 2s}
   built:
     command: ./out/app
     build: {run: [./mk], creates: out/app}
   child:
     command: ./tool
-    healthcheck: {test: [sh, -c, 'sleep 30 & exit 0'], interval: 1s, timeout: 5s, start_period: 10s}
+    healthcheck: {test: [sh, -c, 'sleep 30 & exit 0'], start_interval: 1s, timeout: 5s, start_period: 10s}
   once:
     command: [sh, -c, 'echo once']
     schedule: "2020-01-01 00:00:00"
@@ -212,7 +212,7 @@ services:
 	check(t, "up of a project whose healthcheck never passes, under restart:, exits nonzero", up.fails())
 	check(t, "  and names it", up.says(p.name+`-ready\.service keeps restarting \(restart #[0-9]*\): its healthcheck has not passed`))
 	ps := p.sc("ps")
-	check(t, "  a program in a directory with a space and a % runs", ps.says("^"+p.name+`-child\.service .* active *running *ready`))
+	check(t, "  a program in a directory with a space and a % runs", ps.says("^"+p.name+`-child\.service .* active *running *healthy`))
 	check(t, "  so does one its build made from a clean tree", ps.says("^"+p.name+`-built\.service .* active *running`))
 	check(t, "  a calendar that has passed is noted", up.says(`schedule: "2020-01-01 00:00:00" has no next run`))
 	check(t, "  and its timer is not said to be running a job", ps.says(p.name+`-once\.timer .*no next run`))

@@ -4,18 +4,22 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Healthcheck is a readiness probe: the service counts as started once
-// Test passes.
+// Healthcheck is a test the service must pass to count as started; then
+// it runs every Interval while the service does, and Retries failed in a
+// row make the service unhealthy, as in compose.
 type Healthcheck struct {
-	Test        []string
-	Interval    string
-	Timeout     string
-	StartPeriod string
+	Test          []string
+	Interval      string // between checks once started
+	Timeout       string
+	Retries       int
+	StartPeriod   string // how long the start waits for a pass
+	StartInterval string // between checks while starting
 }
 
 // StartTimeout is the TimeoutStartSec= a healthcheck gives its service, in
@@ -27,7 +31,9 @@ func (h *Healthcheck) StartTimeout() int {
 }
 
 func parseHealthcheck(n *yaml.Node, ctx string) (*Healthcheck, error) {
-	h := &Healthcheck{Interval: Default("healthcheck.interval"), Timeout: Default("healthcheck.timeout"), StartPeriod: Default("healthcheck.start_period")}
+	retries, _ := strconv.Atoi(Default("healthcheck.retries"))
+	h := &Healthcheck{Interval: Default("healthcheck.interval"), Timeout: Default("healthcheck.timeout"), Retries: retries,
+		StartPeriod: Default("healthcheck.start_period"), StartInterval: Default("healthcheck.start_interval")}
 	m, err := mapping(n, ctx+": healthcheck")
 	if err != nil {
 		return nil, err
@@ -40,7 +46,7 @@ func parseHealthcheck(n *yaml.Node, ctx string) (*Healthcheck, error) {
 	}
 	known := &mapNode{}
 	for _, kv := range m.pairs {
-		if composeHealthKey(kv.key.Value) == "" {
+		if kv.key.Value != "disable" { // answered above
 			known.pairs = append(known.pairs, kv)
 		}
 	}
@@ -52,17 +58,25 @@ func parseHealthcheck(n *yaml.Node, ctx string) (*Healthcheck, error) {
 			problems = append(problems, err.Error())
 		}
 	}
+	if rn := m.get("retries"); rn != nil {
+		k, _ := healthcheckMap.key("retries")
+		if s, err := scalar(rn, ctx+": healthcheck: retries"); err != nil {
+			problems = append(problems, err.Error())
+		} else if h.Retries, err = strconv.Atoi(s); err != nil || float64(h.Retries) < k.Forms[0].Min {
+			problems = append(problems, fmt.Sprintf("line %d: %s: healthcheck: retries: %q; use a positive integer", rn.Line, ctx, s))
+		}
+	}
 	for _, f := range []struct {
 		key string
 		dst *string
-	}{{"interval", &h.Interval}, {"timeout", &h.Timeout}, {"start_period", &h.StartPeriod}} {
+	}{{"interval", &h.Interval}, {"timeout", &h.Timeout}, {"start_period", &h.StartPeriod}, {"start_interval", &h.StartInterval}} {
 		if dn := m.get(f.key); dn != nil {
 			def := *f.dst
 			if *f.dst, err = duration(dn, ctx+": healthcheck: "+f.key); err != nil {
 				problems = append(problems, err.Error())
 			} else if n, _ := Seconds(*f.dst); n == 0 && f.key != "start_period" {
-				// interval: 0 runs the test as fast as it can spawn, and
-				// timeout: 0 kills every test at once
+				// an interval of 0 runs the test as fast as it can spawn,
+				// and timeout: 0 kills every test at once
 				problems = append(problems, fmt.Sprintf("line %d: %s: healthcheck: %s: must be more than 0 (leave it out for the default, %s)", dn.Line, ctx, f.key, def))
 			} else if x, _ := spanSeconds(*f.dst); x != float64(n) {
 				// the probe counts whole seconds: 200ms would run as 1s, and

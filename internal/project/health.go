@@ -131,10 +131,11 @@ func verdict(st systemd.UnitState, svc *config.Service, probeExit int) string {
 }
 
 // healthOf words a healthchecked service's state: starting while it
-// activates (the probe runs as ExecStartPost=), ready once it passed,
-// probe failed when the probe is why it failed, unhealthy while systemd
-// keeps restarting it.
-func healthOf(st systemd.UnitState, probeExit int) string {
+// activates (the probe runs as ExecStartPost=), then what the checks after
+// the start last found: healthy, or unhealthy after retries failed in a
+// row; unchecked when no watch keeps a state for this run. probe failed
+// when the probe is why it failed.
+func healthOf(st systemd.UnitState, probeExit int, check probe.State, checked bool) string {
 	switch {
 	case st.Restarting() && st.NRestarts > 0:
 		return fmt.Sprintf("restarting (#%d)", st.NRestarts)
@@ -142,8 +143,12 @@ func healthOf(st systemd.UnitState, probeExit int) string {
 		return "restarting"
 	case st.ActiveState == "activating":
 		return "starting"
+	case (st.ActiveState == "active" || st.ActiveState == "reloading") && !checked:
+		return "unchecked"
+	case (st.ActiveState == "active" || st.ActiveState == "reloading") && !check.Healthy:
+		return "unhealthy"
 	case st.ActiveState == "active" || st.ActiveState == "reloading":
-		return "ready"
+		return "healthy"
 	case st.ActiveState == "failed" && probeExit == probe.MainGone:
 		return "program exited"
 	case st.ActiveState == "failed" && probeExit > 0:

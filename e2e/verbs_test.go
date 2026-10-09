@@ -265,7 +265,7 @@ func TestUp_ServiceStoppedFromElsewhere(t *testing.T) {
 services:
   slow:
     command: [sh, -c, "while true; do sleep 5; done"]
-    healthcheck: {test: [sh, -c, "test -f DIR/ok"], interval: 2s, timeout: 5s, start_period: 30s}
+    healthcheck: {test: [sh, -c, "test -f DIR/ok"], start_interval: 2s, timeout: 5s, start_period: 30s}
 `)
 	wait, _ := background(p.dir, sc, "up")
 	time.Sleep(6 * time.Second)

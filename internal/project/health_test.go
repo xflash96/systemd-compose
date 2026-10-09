@@ -57,15 +57,27 @@ func TestVerdict_NamesWhatWentWrong(t *testing.T) {
 // word ps can show.
 func TestHealthOf_NamesEachState(t *testing.T) {
 	words := map[string]bool{}
+	healthy, unhealthy := probe.State{Healthy: true}, probe.State{Failed: 3}
 	cases := []struct {
-		active string
-		exit   int
-		want   string
-	}{{"activating", -1, "starting"}, {"active", 0, "ready"}, {"failed", 1, "probe failed"}, {"failed", probe.MainGone, "program exited"}, {"failed", -1, "failed"}, {"inactive", 0, "-"}} // a failed unit whose probe exit a reload forgot is "failed", not "-"
+		active  string
+		exit    int
+		check   probe.State
+		checked bool
+		want    string
+	}{
+		{"activating", -1, healthy, true, "starting"},
+		{"active", 0, healthy, true, "healthy"},
+		{"active", 0, unhealthy, true, "unhealthy"},
+		{"active", 0, healthy, false, "unchecked"}, // no watch keeps a state for this run
+		{"failed", 1, healthy, false, "probe failed"},
+		{"failed", probe.MainGone, healthy, false, "program exited"},
+		{"failed", -1, healthy, false, "failed"}, // a failed unit whose probe exit a reload forgot is "failed", not "-"
+		{"inactive", 0, healthy, false, "-"},
+	}
 	for _, c := range cases {
-		h := healthOf(systemd.UnitState{ActiveState: c.active}, c.exit)
+		h := healthOf(systemd.UnitState{ActiveState: c.active}, c.exit, c.check, c.checked)
 		if h != c.want {
-			t.Errorf("healthOf(%s, %d) = %q, want %q", c.active, c.exit, h, c.want)
+			t.Errorf("healthOf(%s, %d, %+v, %v) = %q, want %q", c.active, c.exit, c.check, c.checked, h, c.want)
 		}
 		words[h] = true
 	}
@@ -76,7 +88,7 @@ func TestHealthOf_NamesEachState(t *testing.T) {
 		{ActiveState: "activating", SubState: "auto-restart"}:               "restarting",
 		{ActiveState: "activating", SubState: "start-post", NRestarts: 3}:   "starting",
 	} {
-		h := healthOf(st, -1)
+		h := healthOf(st, -1, probe.State{}, false)
 		if h != want {
 			t.Errorf("healthOf(%+v) = %q, want %q", st, h, want)
 		}

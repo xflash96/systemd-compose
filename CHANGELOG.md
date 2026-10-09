@@ -24,9 +24,20 @@ Each release of systemd-compose, newest first.
   after its plan has said so. Its healthcheck line says how long it waits
   in the yaml's terms: until the test passes or `start_period` runs out,
   and what the service's `restart:` does if it fails.
-- `config` names a compose file's `build: .` and a healthcheck's `CMD` and
-  `retries` in the same round as the keys it does not take, each with
-  what to write instead.
+- `config` names a compose file's `build: .` and a healthcheck's `CMD` in
+  the same round as the keys it does not take, each with what to write
+  instead.
+- A healthcheck keeps checking once the service has started, as compose's
+  does: the test runs every `interval` (30s by default) while the service
+  runs, and `retries` (3) failed in a row make `ps` say `unhealthy`, with
+  since when and what the last check printed; `logs` has a line at each
+  change. As in compose, nothing restarts the service for that. At the
+  start the test runs every `start_interval` (2s), as `interval` did
+  before: a yaml that set `interval` for a quicker start sets
+  `start_interval` now. `ps` says `healthy` where it said `ready`.
+- `start` on a scheduled service names the command that runs the job now
+  as its timer would, with its output in `logs`: `systemctl --user start
+  PROJECT-SERVICE.service`.
 - Outside a project, `-p NAME` acts on the project registered under that
   name, wherever its yaml is, as compose's `-p` does: `systemd-compose -p
   demo logs -f`.

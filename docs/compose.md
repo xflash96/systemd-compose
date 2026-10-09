@@ -9,7 +9,7 @@ restarts it, and keeps its logs in the journal.
 1. Copy `docker-compose.yml` to `systemd-compose.yaml`.
 2. Run `systemd-compose config`. It names every key that has no
    counterpart here, and compose's forms of the keys written another way
-   (`build: .`, a healthcheck's `CMD` and `retries`), with what to write
+   (`build: .`, a healthcheck's `CMD`), with what to write
    instead, all at once.
 3. Replace `image:` with `command:`: the program as it is installed on this
    host. If the program is built from source, put the steps in `build:`.
@@ -29,7 +29,7 @@ restarts it, and keeps its logs in the journal.
 | `environment`, `env_file` | the same, with one difference below |
 | `restart` | the same words; `unless-stopped` is `always`, and `on-failure:N` is refused |
 | `depends_on` | the same forms and conditions |
-| `healthcheck` | `test`, `interval`, `timeout` and `start_period`; no `retries`, no `CMD` prefix |
+| `healthcheck` | the same keys but `disable`; `test` has no `CMD` prefix |
 | `profiles` | the same |
 | `build` | `build: {run, creates}`: steps that make the program, not an image |
 | `x-` keys, anchors, `<<:` | the same |
@@ -70,6 +70,8 @@ Flags that differ:
   compose. The two may not set one key to different values.
 - `depends_on` without a condition is `Wants=`: the dependent starts even
   if its dependency fails. `required: true` makes it `Requires=`.
-- A healthcheck gates the start only. Nothing probes the service after it
-  has started, so `ready` in `ps` means it passed once.
+- A healthcheck's `start_period` is how long the start waits for a pass
+  (60s by default); past it the start fails, where compose keeps the
+  container running. `timeout` defaults to 5s and `start_interval` to 2s
+  (compose: 30s and 5s).
 - There is no `version:` key.

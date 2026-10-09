@@ -2,7 +2,7 @@
 
 `depends_on:` orders a project's services and ties them together.
 `healthcheck:` decides when a service counts as started, so that its
-dependents start after it is ready. [examples/webapp](../examples/webapp)
+dependents start after it is ready, and then keeps checking it. [examples/webapp](../examples/webapp)
 uses both.
 
 ## depends_on
@@ -44,27 +44,39 @@ Each edge becomes systemd directives in the dependent's unit:
     command: node server.js
     healthcheck:
       test: [curl, -sf, http://127.0.0.1:8080/health]
-      interval: 2s        # default 2s
+      interval: 30s       # default 30s
       timeout: 5s         # default 5s
+      retries: 3          # default 3
       start_period: 60s   # default 60s
+      start_interval: 2s  # default 2s
 ```
 
 `test:` is a program and its arguments, run without a shell. Write
 `[sh, -c, '...']` for a shell line. It runs with the service's
 environment, so `[sh, -c, 'curl -sf http://127.0.0.1:$$PORT/health']`
-reads the port the service reads. It runs every `interval`, each run
-limited to `timeout`, until it exits 0 or `start_period` is over.
+reads the port the service reads. Each run is limited to `timeout`.
 
-While it runs, the service is starting: `ps` shows it `activating` with
-HEALTH `starting`. When the test passes, the service is started, HEALTH
-says `ready`, and its dependents start. `up` waits for it, and says how
-long it may wait.
+At the start, the test runs every `start_interval` until it exits 0 or
+`start_period` is over. Meanwhile the service is starting: `ps` shows it
+`activating` with HEALTH `starting`. When the test passes, the service is
+started, HEALTH says `healthy`, and its dependents start. `up` waits for
+it, and says how long it may wait.
 
 If `start_period` ends first, the start fails. The service's `restart:`
 policy then decides whether systemd tries again, and `up` exits 1 naming
 the service. The test's last output is in `systemd-compose logs SERVICE`.
 If the service's program exits while the test is still waiting, the
 start fails at once.
+
+Once the service has started, the test runs every `interval` for as long
+as the service runs, as compose's does. `retries` failed runs in a row
+make HEALTH `unhealthy`, and `ps` says since when and what the last run
+printed; one run that passes makes it `healthy` again. `logs SERVICE` has
+a line at each change. As in compose, nothing restarts an unhealthy
+service: `restart:` acts when the program exits. The checks run in the
+service's cgroup, as compose's run in its container, so they count
+toward its `resources:`: the process that runs them holds about 6 MB
+and 8 threads, which `pids:` counts.
 
 ## Without a healthcheck
 

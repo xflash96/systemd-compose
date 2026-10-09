@@ -184,24 +184,34 @@ services:
     depends_on:
       migrate: {condition: service_completed_successfully}
       db: {required: true, restart: true}
-    # healthcheck: a readiness probe
+    # healthcheck: a test the service must pass, and then keeps passing
     # - optional
     # - the service counts as started once test: passes; until then its
     #   dependents (web) wait
-    # - the probe runs every interval until it passes or start_period is over
-    # - nothing probes the service after it has started
+    # - at the start, the test runs every start_interval until it passes or
+    #   start_period is over
+    # - then it runs every interval: retries failed in a row make the
+    #   service unhealthy in ps; nothing restarts it for that
     healthcheck:
       # test: the probe's program and its arguments
       # - required
       # - a list; no CMD or CMD-SHELL prefix (CMD-SHELL x is [sh, -c, x])
       # - it runs with the service's environment: environment: and env_file:
       test: [curl, -sf, "http://127.0.0.1:${API_PORT:-8080}/health"]
-      # interval: optional, default: 2s; whole seconds
-      interval: 2s
+      # interval: between checks once started; optional, default: 30s;
+      # whole seconds
+      interval: 30s
       # timeout: one test's limit; optional, default: 5s; whole seconds
       timeout: 5s
-      # start_period: how long the probe keeps trying; optional, default: 60s
+      # retries: checks failed in a row that make it unhealthy; optional,
+      # default: 3
+      retries: 3
+      # start_period: how long the start waits for a pass; optional,
+      # default: 60s
       start_period: 60s
+      # start_interval: between checks while it starts; optional, default:
+      # 2s; whole seconds
+      start_interval: 2s
     # build: steps that make what the service runs; not rendered
     # - optional
     # - run: required; the steps, one command each, with no shell: write

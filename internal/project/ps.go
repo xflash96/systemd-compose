@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/xflash96/systemd-compose/internal/config"
+	"github.com/xflash96/systemd-compose/internal/probe"
 	"github.com/xflash96/systemd-compose/internal/systemd"
 )
 
@@ -139,8 +140,9 @@ func (pr *project) table() error {
 		return err
 	}
 	// HEALTH only when something has a healthcheck: the probe's verdict at
-	// start, read from systemd; nothing probes a running service.
+	// start, read from systemd, then what the checks since found.
 	health := map[string]string{}
+	checks := map[string]probe.State{}
 	var probed []string
 	for _, s := range pr.p.Services {
 		if s.Healthcheck != nil {
@@ -152,7 +154,11 @@ func (pr *project) table() error {
 		return err
 	}
 	for _, u := range probed {
-		health[u] = healthOf(states[u], exits[u])
+		st, checked := probe.ReadState(states[u].Invocation)
+		if checked {
+			checks[u] = st
+		}
+		health[u] = healthOf(states[u], exits[u], st, checked)
 	}
 	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
 	row := func(h string, cells ...string) { // h goes before REGISTERED
@@ -250,6 +256,12 @@ func (pr *project) table() error {
 		}
 		if s.NRestarts > 0 && s.Active() && !s.Restarting() {
 			inactive += " (restarted " + times(s.NRestarts) + " since it was started)"
+		}
+		switch c, ok := checks[n]; {
+		case ok && health[n] == "unhealthy":
+			inactive += fmt.Sprintf(" (unhealthy since %s: %d checks failed in a row, the last: %s; %s)", c.Since.Local().Format("15:04:05"), c.Failed, c.Last, logs)
+		case health[n] == "unchecked":
+			inactive += " (nothing checks it now; " + pr.cmd() + " restart " + svc.Name + " starts the checks)"
 		}
 		row(health[n], n, load, active, sub, reg+inactive)
 	}
