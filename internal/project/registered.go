@@ -35,7 +35,9 @@ func asRegistered(cfg, verb string, args []string, f Flags, loadErr error) (bool
 	}
 	dir, err := filepath.EvalSymlinks(filepath.Dir(abs)) // as Load: the yaml's own link is not followed
 	if err != nil {
-		return false, nil
+		// the directory is gone: copies (registration: copy) still name
+		// it, as it was resolved when they were written
+		dir = filepath.Dir(abs)
 	}
 	abs = filepath.Join(dir, filepath.Base(abs))
 	m := &systemd.Manager{User: true}
@@ -128,7 +130,7 @@ func (pr *project) movedFrom(unitDir string) (yaml, name string) {
 		if err != nil || cfg == "" || filepath.Dir(cfg) == pr.p.Dir || exists(cfg) {
 			continue
 		}
-		if t, err := os.Readlink(filepath.Join(unitDir, e.Name())); err == nil && t == filepath.Join(filepath.Dir(cfg), config.RenderDirName, e.Name()) {
+		if l, ok := registered(unitDir, e.Name()); ok && l.target == filepath.Join(filepath.Dir(cfg), config.RenderDirName, e.Name()) {
 			return cfg, m.Project
 		}
 	}
@@ -141,6 +143,7 @@ type registration struct {
 	owner  string // for "project": the other yaml; for "foreign": what sits there
 	gone   bool   // for "project": its files are gone (moved or deleted)
 	masked bool   // for "foreign": a link to /dev/null
+	copied bool   // for "ours" and "project": a copy, not a link (registration: copy)
 }
 
 // notOurs starts the note on a name registered by someone else.
@@ -150,16 +153,45 @@ const notOurs = "NOT OURS: "
 // it.
 func (r registration) note() string { return notOurs + r.owner }
 
-// link is a link in the unit directory into a render directory: the
-// unit's name, the file it points at, and that file's text (err when it
+// link is a unit a project registered, as the unit directory holds it: a
+// link into a render directory, or a copy of a rendered file
+// (registration: copy). target is the render file it stands for, and text
+// the unit's text, read through the link or from the copy (err when it
 // cannot be read).
 type link struct {
 	name, target, text string
 	err                error
+	copied             bool
 }
 
-// renderLinks are the links in unitDir into any render directory: the
-// units of every project registered. err is the unit directory's.
+// registered reads <unitDir>/<name> as a unit a project registered; false
+// for anything else (nothing there, a hand-written file, a link that
+// points elsewhere). A copy is known by the marker in it, which names the
+// yaml, and so the render file it copies.
+func registered(unitDir, name string) (link, bool) {
+	p := filepath.Join(unitDir, name)
+	st, err := os.Lstat(p)
+	if err != nil {
+		return link{}, false
+	}
+	if st.Mode().IsRegular() {
+		data, err := os.ReadFile(p)
+		m := render.ReadMarker(string(data))
+		if err != nil || m.Project == "" || m.Config == "" {
+			return link{}, false
+		}
+		return link{name, filepath.Join(filepath.Dir(m.Config), config.RenderDirName, name), string(data), nil, true}, true
+	}
+	target, err := os.Readlink(p)
+	if err != nil || filepath.Base(filepath.Dir(target)) != config.RenderDirName {
+		return link{}, false
+	}
+	data, err := os.ReadFile(target)
+	return link{name, target, string(data), err, false}, true
+}
+
+// renderLinks are the units of every project registered in unitDir. err
+// is the unit directory's.
 func renderLinks(unitDir string) ([]link, error) {
 	entries, err := os.ReadDir(unitDir)
 	if err != nil {
@@ -167,15 +199,12 @@ func renderLinks(unitDir string) ([]link, error) {
 	}
 	var out []link
 	for _, e := range entries {
-		if e.Type()&os.ModeSymlink == 0 {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") { // a copy being written
 			continue
 		}
-		target, err := os.Readlink(filepath.Join(unitDir, e.Name()))
-		if err != nil || filepath.Base(filepath.Dir(target)) != config.RenderDirName {
-			continue
+		if l, ok := registered(unitDir, e.Name()); ok {
+			out = append(out, l)
 		}
-		data, err := os.ReadFile(target)
-		out = append(out, link{e.Name(), target, string(data), err})
 	}
 	return out, nil
 }
@@ -191,6 +220,23 @@ func linksInto(unitDir, renderDir string) ([]link, error) {
 		}
 	}
 	return out, err
+}
+
+// RenderDirs maps each render directory units are registered from to its
+// project's name: the marker's, or the unit name's when the file cannot
+// be read.
+func RenderDirs(unitDir string) map[string]string {
+	out := map[string]string{}
+	links, _ := renderLinks(unitDir)
+	for _, l := range links {
+		name := render.ReadMarker(l.text).Project
+		if name == "" {
+			prefix, _, _ := strings.Cut(strings.TrimSuffix(l.name, filepath.Ext(l.name)), "-")
+			name = config.UnescapeName(prefix)
+		}
+		out[filepath.Dir(l.target)] = name
+	}
+	return out
 }
 
 // RegisteredConfig is the yaml project name is registered from, as its
@@ -241,6 +287,13 @@ func (pr *project) registrationOf(unitDir, name string) registration {
 		return registration{kind: "none"}
 	}
 	if st.Mode()&os.ModeSymlink == 0 {
+		if l, ok := registered(unitDir, name); ok {
+			if l.target == filepath.Join(pr.renderDir, name) {
+				return registration{kind: "ours", copied: true}
+			}
+			m := render.ReadMarker(l.text)
+			return registration{kind: "project", owner: "project " + m.Project + " from " + m.Config + " (a copy)", copied: true}
+		}
 		return registration{kind: "foreign", owner: "a regular file at " + p + " (hand-written?)"}
 	}
 	target, err := os.Readlink(p)

@@ -258,3 +258,61 @@ func TestNames_SystemdsOwnAndTwins(t *testing.T) {
 	check(t, "  then top in the twin's directory says nothing runs", t2.sc("top", "-n", "1").says("nothing of project "+name+" runs"))
 	check(t, "  and the project's own unit name, unregistered, is no outsider", t1.sc("reset-failed", unit).lacks("not of project"))
 }
+
+// TestRegistration_CopiesLoadWithoutTheProject checks registration: copy:
+// the units are files of their own, so systemd keeps them loaded while
+// the project's directory is gone (a filesystem not mounted), and -p NAME
+// reaches them from elsewhere. up switches between copies and links
+// either way, the target's boot link following; an orphan's copy is
+// retired, and down leaves nothing.
+func TestRegistration_CopiesLoadWithoutTheProject(t *testing.T) {
+	yaml := func(reg, extra string) string {
+		return "name: NAME\n" + reg + "services:\n  a: {command: [sleep, infinity]}\n" + extra
+	}
+	p := newProject(t, "cp", "cp", yaml("registration: copy\n", ""))
+	unit := p.unit("a", ".service")
+	isCopy := func(name string) error {
+		st, err := os.Lstat(filepath.Join(unitDir, name))
+		return that(err == nil && st.Mode().IsRegular(), "%s is no copy in the unit directory: %v", name, err)
+	}
+	isLink := func(name string) error {
+		t, err := os.Readlink(filepath.Join(unitDir, name))
+		return that(err == nil && strings.HasSuffix(t, "/.systemd-compose/"+name), "%s is no link into the render directory: %q %v", name, t, err)
+	}
+	wants := func() string {
+		t, _ := os.Readlink(filepath.Join(unitDir, "default.target.wants", p.name+".target"))
+		return t
+	}
+
+	check(t, "up of a project with registration: copy", p.sc("up").shows(regexp.QuoteMeta(unit)+` +new +copy, start`))
+	check(t, "  copies its units", isCopy(unit))
+	check(t, "  and the target's boot link names the copy", equal("wants", wants(), filepath.Join(unitDir, p.name+".target")))
+	check(t, "  ps says copied", p.sc("ps").shows(regexp.QuoteMeta(unit)+` +loaded +active +running +copied`))
+
+	away := p.dir + ".away"
+	if err := os.Rename(p.dir, away); err != nil {
+		t.Fatal(err)
+	}
+	systemctl("daemon-reload")
+	check(t, "with the directory gone and a reload, the unit stays loaded", equal("LoadState", property(unit, "LoadState"), "loaded"))
+	check(t, "  and -p NAME ps elsewhere shows it", run(t.TempDir(), nil, sc, "-p", p.name, "ps").shows(regexp.QuoteMeta(unit)+` +loaded +active`))
+	if err := os.Rename(away, p.dir); err != nil {
+		t.Fatal(err)
+	}
+
+	p.write(yaml("", ""))
+	check(t, "up without registration: links in place of the copies", p.sc("up").shows(regexp.QuoteMeta(unit)+` +unchanged +link, in place of its copy`))
+	check(t, "  the unit is a link", isLink(unit))
+	check(t, "  the target's boot link names its render file", that(strings.HasSuffix(wants(), "/.systemd-compose/"+p.name+".target"), "wants %s", wants()))
+	check(t, "  and the service ran on", p.sc("ps").shows(regexp.QuoteMeta(unit)+` +loaded +active +running`))
+
+	p.write(yaml("registration: copy\n", "  b: {command: [sleep, infinity]}\n"))
+	check(t, "up with registration: copy again copies in place of the links", p.sc("up").shows(regexp.QuoteMeta(unit)+` +unchanged +copy, in place of its link`))
+	check(t, "  the unit is a copy", isCopy(unit))
+	p.write(yaml("registration: copy\n", ""))
+	check(t, "up --force retires a dropped service's copy", p.sc("up", "--force").shows("retired orphan "+regexp.QuoteMeta(p.unit("b", ".service"))))
+	check(t, "  and removes it", missing(filepath.Join(unitDir, p.unit("b", ".service"))))
+	check(t, "down", p.sc("down").ok())
+	check(t, "  leaves no copy or link", equal("entries", p.links(), 0))
+	check(t, "  nor the boot link", missing(filepath.Join(unitDir, "default.target.wants", p.name+".target")))
+}

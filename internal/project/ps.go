@@ -183,6 +183,10 @@ func (pr *project) table() error {
 		}
 		reg := s.UnitFileState
 		switch {
+		case r.kind == "ours" && r.copied && !exists(path):
+			reg = "copied, but its rendered file is gone (up writes it again)"
+		case r.kind == "ours" && r.copied && reg != "enabled":
+			reg = "copied" // systemd's word for a unit with no [Install] is "static"
 		case r.kind == "ours" && !exists(path):
 			// systemd keeps running a unit whose file is gone; the state
 			// notes below still apply

@@ -15,12 +15,6 @@ func (m *Manager) Link(paths []string) error {
 	return m.Run(append([]string{"link", "--no-reload"}, paths...)...)
 }
 
-// LinkLoaded links and reloads, for a unit needed before up's own reload:
-// the manager does not see a file linked with --no-reload. Re-linking an
-// already-linked path reloads too, so an active slice takes its new text;
-// The e2e check "and the build saw the new cap" holds it.
-func (m *Manager) LinkLoaded(path string) error { return m.Run("link", path) }
-
 // Enable enables a unit: for a target, boot starts it.
 func (m *Manager) Enable(unit string) error { return m.Run("enable", unit) }
 

@@ -239,20 +239,15 @@ func yamlGone(m *systemd.Manager) {
 	if err != nil {
 		return
 	}
-	entries, _ := os.ReadDir(unitDir)
+	from := project.RenderDirs(unitDir)
 	dir, err := os.Getwd()
 	if err != nil {
 		return
 	}
 	for {
-		render := filepath.Join(dir, config.RenderDirName)
-		for _, e := range entries {
-			if target, err := os.Readlink(filepath.Join(unitDir, e.Name())); err == nil && filepath.Dir(target) == render {
-				prefix, _, _ := strings.Cut(strings.TrimSuffix(e.Name(), filepath.Ext(e.Name())), "-")
-				name := config.UnescapeName(prefix)
-				fmt.Printf("note: project %s is registered from %s, whose %s is gone: put it back and run down there, or see README, \"Moving or deleting a project\"; this verb acts on the user instance\n", name, dir, config.ConfigFileName)
-				return
-			}
+		if name := from[filepath.Join(dir, config.RenderDirName)]; name != "" {
+			fmt.Printf("note: project %s is registered from %s, whose %s is gone (or its filesystem is not mounted): put it back and run down there, or see README, \"Moving or deleting a project\"; this verb acts on the user instance\n", name, dir, config.ConfigFileName)
+			return
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {

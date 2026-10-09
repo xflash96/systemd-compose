@@ -10,6 +10,10 @@ Each release of systemd-compose, newest first.
   `my_app`.
 - `import UNIT` prints a `systemd-compose.yaml` that runs a unit you wrote
   by hand as a project's service, and the commands that retire the unit.
+- `registration: copy` registers copies of the units instead of links to
+  `.systemd-compose/`, so they load at boot while the project's filesystem
+  (NFS, FUSE) is not mounted yet. `up` warns when a project there is
+  registered with links.
 - Outside a project, `-p NAME` acts on the project registered under that
   name, wherever its yaml is, as compose's `-p` does: `sc -p demo logs
   -f` from any directory.

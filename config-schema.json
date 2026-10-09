@@ -193,6 +193,20 @@
       ],
       "description": "The project's name, the prefix of every unit. Letters, digits, _ and -, not starting with -; at most 200 characters, a - counting 4 (units spell it \\x2d). Default: the directory's name, with _ for anything else. -p NAME and SYSTEMD_COMPOSE_PROJECT_NAME override it."
     },
+    "registration": {
+      "anyOf": [
+        {
+          "enum": [
+            "link",
+            "copy"
+          ]
+        },
+        {
+          "$ref": "#/definitions/interpolated"
+        }
+      ],
+      "description": "How up registers the units. link: links in your unit directory to the files in .systemd-compose/. copy: copies of those files, which load at boot even while the project's filesystem is not mounted (NFS, FUSE). Default: link."
+    },
     "resources": {
       "$ref": "#/definitions/resourcesMap",
       "description": "A cap on the whole project, on its slice. A change applies in place and restarts nothing."

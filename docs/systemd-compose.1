@@ -519,12 +519,27 @@ and
 need a project.
 .SH THE PROJECT FILE
 .B systemd-compose.yaml
-has three top-level keys:
+has four top-level keys:
 .B name
 (the project name),
 .B resources
-(caps on the whole project, as for a service) and
+(caps on the whole project, as for a service),
+.B registration
+and
 .BR services .
+.B up
+registers each unit as a link to its file in
+.B .systemd\-compose/
+when
+.B registration
+is
+.B link
+(the default), and as a copy of the file when it is
+.BR copy .
+systemd loads copies at boot even while the project's filesystem (NFS,
+FUSE) is not mounted yet;
+.B up
+warns about links into such a filesystem.
 A key starting with
 .B x\-
 is ignored; it holds yaml anchors for merge keys.
@@ -720,6 +735,12 @@ Nothing else from the shell's environment reaches a service.
 .TP
 .B systemd-compose.yaml
 The project, in the current directory or a parent.
+A symlink to a yaml elsewhere makes a project where the link is: its
+name, its
+.BR .env ,
+its
+.B .systemd\-compose/
+and its relative paths are the link's directory's.
 .TP
 .B .env
 Beside the yaml: the variables for interpolation, and
@@ -735,7 +756,9 @@ writes and links; it ignores itself in git.
 .B ~/.config/systemd/user/
 The links
 .B up
-makes to the rendered units, and
+makes to the rendered units (or their copies, with
+.BR "registration: copy" ),
+and
 .BI default.target.wants/ PROJECT .target\fR,
 which starts the project at boot (with lingering).
 .TP

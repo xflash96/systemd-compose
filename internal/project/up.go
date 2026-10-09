@@ -215,6 +215,9 @@ func (pr *project) upNotes(unitDir string) {
 	if missing > 0 {
 		fmt.Printf("note: %s (a git clean?): up writes them again, and with nothing to compare against, what runs reads changed (no baseline)\n", goneFiles(missing))
 	}
+	if kind := systemd.LateFS(pr.p.Dir, unitDir); kind != "" && pr.p.Registration != "copy" {
+		fmt.Printf("WARNING: this project is on %s, and its units are links into it: when the user manager starts before %s is mounted (at boot), they are missing, and the project does not start, then or once it is mounted. registration: copy in the yaml registers copies instead; README, \"A project on a network filesystem\"\n", kind, kind)
+	}
 	if cfg, name := pr.movedFrom(unitDir); cfg != "" && name != pr.p.Name {
 		fmt.Printf("WARNING: this directory was moved from %s without a down, and project %s is still registered from there: this up starts a second copy, as project %s. README, \"Moving or deleting a project\", moves one\n", filepath.Dir(cfg), name, pr.p.Name)
 	}
@@ -388,7 +391,14 @@ func (pr *project) planUnit(pl *upPlan, name, text string) (planRow, error) {
 		pl.envRead[name] = true
 	}
 	isRestartable := pr.restartable(svc, name)
-	if !st.Known() || st.UnitFileState == "" {
+	switch r, copies := pr.registrationOf(pl.unitDir, name), pr.p.Registration == "copy"; {
+	case r.kind == "ours" && r.copied != copies && copies:
+		row.actions = append(row.actions, "copy, in place of its link")
+	case r.kind == "ours" && r.copied != copies:
+		row.actions = append(row.actions, "link, in place of its copy")
+	case copies && r.kind != "ours":
+		row.actions = append(row.actions, "copy")
+	case !copies && (!st.Known() || st.UnitFileState == ""):
 		row.actions = append(row.actions, "link")
 	}
 	changed := strings.HasPrefix(row.change, changeText)
@@ -672,12 +682,18 @@ func (pr *project) runBuilds(builds []*config.Service) error {
 			if u.Name != pr.p.SliceName() {
 				continue
 			}
-			path := filepath.Join(pr.renderDir, u.Name)
-			if err := systemd.WriteUnit(path, u.Text); err != nil {
+			if err := systemd.WriteUnit(filepath.Join(pr.renderDir, u.Name), u.Text); err != nil {
 				return err
 			}
-			if err := pr.m.LinkLoaded(path); err != nil {
-				return fmt.Errorf("link: %w", err)
+			unitDir, err := pr.m.UnitDir()
+			if err != nil {
+				return err
+			}
+			if err := pr.register(unitDir, []render.Rendered{u}); err != nil {
+				return err
+			}
+			if err := pr.m.Run("daemon-reload"); err != nil {
+				return fmt.Errorf("daemon-reload: %w", err)
 			}
 			break
 		}
@@ -701,7 +717,6 @@ func (pr *project) writeAndLink(pl *upPlan) error {
 	for _, u := range pl.spared {
 		byDesign[u] = true
 	}
-	var paths []string
 	for _, u := range pr.rendered {
 		path := filepath.Join(pr.renderDir, u.Name)
 		if err := systemd.WriteUnit(path, u.Text); err != nil {
@@ -716,10 +731,40 @@ func (pr *project) writeAndLink(pl *upPlan) error {
 				return err
 			}
 		}
-		paths = append(paths, path)
 	}
-	if err := pr.m.Link(paths); err != nil {
-		return fmt.Errorf("link: %w", err)
+	return pr.register(pl.unitDir, pr.rendered)
+}
+
+// register puts rendered units in the unit directory as registration:
+// says, without a reload: links into the render directory (systemctl
+// link), or copies of the files. A unit of ours registered the other way
+// gives way first, with the links enable made to it, so the target's
+// next enable links the new file.
+func (pr *project) register(unitDir string, units []render.Rendered) error {
+	copies := pr.p.Registration == "copy"
+	var paths []string
+	for _, u := range units {
+		path := filepath.Join(pr.renderDir, u.Name)
+		if r := pr.registrationOf(unitDir, u.Name); r.kind == "ours" && r.copied != copies {
+			if err := unlink(unitDir, u.Name, path); err != nil {
+				return err
+			}
+			if r.copied {
+				if err := os.Remove(filepath.Join(unitDir, u.Name)); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+			}
+		}
+		if !copies {
+			paths = append(paths, path)
+		} else if err := systemd.WriteUnit(filepath.Join(unitDir, u.Name), u.Text); err != nil {
+			return err
+		}
+	}
+	if len(paths) > 0 {
+		if err := pr.m.Link(paths); err != nil {
+			return fmt.Errorf("link: %w", err)
+		}
 	}
 	return nil
 }

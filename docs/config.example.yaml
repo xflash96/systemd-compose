@@ -50,6 +50,15 @@ resources:
   # - a positive integer
   pids: 512
 
+# registration: how up registers the units in your unit directory
+# - optional, default: link
+# - link: links to the files up writes in .systemd-compose/
+# - copy: copies of those files, which systemd loads at boot even while
+#   the project's filesystem is not mounted yet (NFS, FUSE); a service
+#   whose files are there fails to start until it is, and a restart:
+#   delay retries it
+registration: link
+
 # x-ANYTHING: ignored, at the top level or inside a service
 # - optional
 # - holds a yaml anchor that services merge in with <<:, as in compose

@@ -70,10 +70,18 @@ func (f Form) key(name string) (Key, bool) {
 	return Key{}, false
 }
 
+// has reports whether an Object form has the key.
+func (f Form) has(name string) bool { _, ok := f.key(name); return ok }
+
 // Default is the default of a service's key, by its path:
-// Default("schedule.accuracy") is "10s". A path the table lacks panics.
+// Default("schedule.accuracy") is "10s"; or of a top-level key the
+// services lack: Default("registration") is "link". A path the table
+// lacks panics.
 func Default(path string) string {
 	f, k := serviceMap, Key{}
+	if first, _, _ := strings.Cut(path, "."); !serviceMap.has(first) {
+		f = Spec
+	}
 	for _, name := range strings.Split(path, ".") {
 		var ok bool
 		if k, ok = f.key(name); !ok {
@@ -134,6 +142,7 @@ var (
 	restartPolicy = Form{Kind: Word, Words: []string{"no", "on-failure", "always", "unless-stopped"}}
 	condition     = Form{Kind: Word, Words: []string{"service_started", "service_healthy", "service_completed_successfully"}}
 	onChange      = Form{Kind: Word, Words: []string{"restart", "start-only"}}
+	registration  = Form{Kind: Word, Words: []string{"link", "copy"}}
 )
 
 // The maps some keys take.
@@ -245,5 +254,6 @@ var serviceMap = Form{Kind: Object, Extensions: true, RequireAny: []string{"comm
 var Spec = Form{Kind: Object, Extensions: true, Keys: []Key{
 	{Name: "name", Doc: "The project's name, the prefix of every unit. Letters, digits, _ and -, not starting with -; at most 200 characters, a - counting 4 (units spell it \\x2d). Default: the directory's name, with _ for anything else. -p NAME and SYSTEMD_COMPOSE_PROJECT_NAME override it.", Forms: []Form{{Kind: Text, Pattern: projectNamePattern, MaxLen: maxProjectName}, interpolated}},
 	{Name: "resources", Doc: "A cap on the whole project, on its slice. A change applies in place and restarts nothing.", Forms: []Form{resourcesMap}},
+	{Name: "registration", Default: "link", Doc: "How up registers the units. link: links in your unit directory to the files in .systemd-compose/. copy: copies of those files, which load at boot even while the project's filesystem is not mounted (NFS, FUSE).", Forms: []Form{registration, interpolated}},
 	{Name: "services", Required: true, Doc: "The services, by name. Each becomes PROJECT-NAME.service.", Forms: []Form{{Kind: Map, MinLen: 1, Pattern: serviceNamePattern, Items: []Form{serviceMap}}}},
 }}

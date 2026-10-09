@@ -162,10 +162,14 @@ func (pr *project) unregister(units []string) (stopped int, err error) {
 	}
 	// systemctl refuses to disable a unit whose file is gone (a git clean
 	// took the render directory): its links go by hand, as disable would
-	// remove them, and the reload makes the manager forget the file.
-	var present []string
+	// remove them, and the reload makes the manager forget the file. A
+	// copy (registration: copy) is a file of its own, which disable leaves
+	// in place: it goes by hand after the disable.
+	var present, copies []string
 	for _, u := range units {
-		if exists(filepath.Join(pr.renderDir, u)) {
+		if r := pr.registrationOf(unitDir, u); r.kind == "ours" && r.copied {
+			present, copies = append(present, u), append(copies, u)
+		} else if exists(filepath.Join(pr.renderDir, u)) {
 			present = append(present, u)
 		} else if err := unlink(unitDir, u, filepath.Join(pr.renderDir, u)); err != nil {
 			return 0, err
@@ -192,6 +196,16 @@ func (pr *project) unregister(units []string) (stopped int, err error) {
 		}
 		first, _, _ := strings.Cut(strings.TrimSpace(said), "\n")
 		fmt.Printf("  (systemctl disable failed: %s; the links were removed by hand instead)\n", first)
+	}
+	if len(copies) > 0 {
+		for _, u := range copies {
+			if err := os.Remove(filepath.Join(unitDir, u)); err != nil && !os.IsNotExist(err) {
+				return 0, err
+			}
+		}
+		if err := pr.m.Run("daemon-reload"); err != nil {
+			return 0, fmt.Errorf("daemon-reload: %w", err)
+		}
 	}
 	rfErr := pr.m.ResetFailed(units)
 	if len(still) > 0 {

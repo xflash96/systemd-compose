@@ -315,13 +315,22 @@ func TestSpec_DefaultsAreValuesTheirKeysTake(t *testing.T) {
 			t.Errorf("%s: its default %q is not a value it takes: %v", path, k.Default, err)
 		}
 	})
+	top := 0
+	for _, k := range Spec.Keys {
+		if k.Default != "" {
+			top++
+			if got := Default(k.Name); got != k.Default {
+				t.Errorf("Default(%q) is %q, want %q", k.Name, got, k.Default)
+			}
+		}
+	}
 	walk(Spec, "", func(k Key, _ string) {
 		if k.Default != "" {
 			all++
 		}
 	})
-	if all != inService {
-		t.Errorf("%d defaults sit outside a service, where config.Default does not reach", all-inService)
+	if all != inService+top {
+		t.Errorf("%d defaults sit below the top level outside a service, where config.Default does not reach", all-inService-top)
 	}
 }
 

@@ -44,8 +44,9 @@ the file. [Try it](#try-it) starts with a small one.
 ## How it works
 
 `up` writes a unit file per service into `.systemd-compose/` beside the
-yaml, links the files into `~/.config/systemd/user/`, and starts the
-project. For a project named `demo`:
+yaml, links the files into `~/.config/systemd/user/` (or copies them, for
+[a project on a network filesystem](#a-project-on-a-network-filesystem)),
+and starts the project. For a project named `demo`:
 
 ```
 demo.slice                 the cgroup every service runs in, with the project's caps
@@ -243,6 +244,31 @@ systemctl --user daemon-reload
 
 systemd warns during the stop that the unit files changed on disk. That is
 expected.
+
+## A project on a network filesystem
+
+`up` registers each unit as a link to its file in `.systemd-compose/`. On
+NFS, FUSE or another filesystem mounted after your user manager starts,
+those links are missing at boot, and the project does not start, then or
+once the filesystem is mounted. `up` warns about it. There are two ways
+out.
+
+Keep the project's directory on a local disk, and link the yaml into it
+from the repository. A `systemd-compose.yaml` that is a symlink makes a
+project where the link is: its name, its `.env`, its `.systemd-compose/`
+and its relative paths are the link's directory's.
+
+```
+mkdir -p ~/services/demo && cd ~/services/demo
+ln -s /mnt/nfs/src/demo/systemd-compose.yaml .
+sc up
+```
+
+Or set `registration: copy` in the yaml. `up` then copies the units into
+`~/.config/systemd/user/`, and systemd loads them at boot. A service whose
+files are on the filesystem fails to start until it is mounted; a
+`restart:` with a delay, such as `{policy: always, delay: 10s}`, retries
+it.
 
 ## Local changes
 

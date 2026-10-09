@@ -63,6 +63,7 @@ type Project struct {
 	Dir          string // directory holding the yaml, absolute
 	ConfigPath   string // the yaml, absolute
 	Resources    *Resources
+	Registration string     // link | copy: how up registers the units
 	Services     []*Service // in file order, every profile
 	Profiles     []string   // the active profiles; "*" is all
 	ProfilesFrom string     // --profile | environment | .env
@@ -215,6 +216,18 @@ func parse(data []byte, abs string, override, from string, vars map[string]strin
 		if len(p.Name) > maxProjectName {
 			return nil, fmt.Errorf("the directory name %s... is too long for a project name (%d characters at most); set name:", p.Name[:40], maxProjectName)
 		}
+	}
+
+	p.Registration = Default("registration")
+	if n := top.get("registration"); n != nil {
+		s, err := scalar(n, "registration")
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(registration.Words, s) {
+			return nil, fmt.Errorf("line %d: registration: %q; use %s", n.Line, s, orList(registration.Words))
+		}
+		p.Registration = s
 	}
 
 	if n := top.get("resources"); n != nil {

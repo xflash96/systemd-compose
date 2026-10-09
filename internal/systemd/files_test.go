@@ -34,3 +34,21 @@ func TestWriteUnit_KeepsMtimeOfSameText(t *testing.T) {
 		t.Errorf("changed text not written: mtime %v, err %v", mtime(p), err)
 	}
 }
+
+// A project on a filesystem mounted late is named, unless the unit
+// directory is on that filesystem too. /proc stands in for one: no test
+// host has NFS or FUSE to hand.
+func TestLateFS_NamesALateFilesystemNotTheUnitDirectorys(t *testing.T) {
+	if LateFS(t.TempDir(), t.TempDir()) != "" {
+		t.Errorf("a local directory is named as mounted late")
+	}
+	const procMagic = 0x9fa0
+	mountedLate[procMagic] = "procfs"
+	defer delete(mountedLate, procMagic)
+	if got := LateFS("/proc", t.TempDir()); got != "procfs" {
+		t.Errorf("LateFS(/proc, a local directory) = %q, want procfs", got)
+	}
+	if got := LateFS("/proc", "/proc/self"); got != "" {
+		t.Errorf("LateFS on the unit directory's own filesystem = %q, want none", got)
+	}
+}

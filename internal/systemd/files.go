@@ -117,3 +117,33 @@ func SweepEmptyWants(unitDir string) {
 		}
 	}
 }
+
+// mountedLate are the filesystems that may be missing when the user
+// manager starts and loads its units: network ones, FUSE (sshfs, rclone),
+// an eCryptfs directory unlocked at login, and an autofs mount point.
+var mountedLate = map[int64]string{
+	0x6969: "NFS", 0x517b: "SMB", 0xff534d42: "CIFS", 0xfe534d42: "SMB2",
+	0x65735546: "FUSE", 0x01021997: "9p", 0x00c36400: "Ceph", 0x5346414f: "AFS",
+	0x73757245: "Coda", 0xf15f: "eCryptfs", 0x0187: "autofs",
+}
+
+// LateFS names the filesystem dir is on when it is one of mountedLate and
+// not the filesystem of unitDir: units linked into dir are then missing
+// whenever the user manager starts before it is mounted. On the unit
+// directory's own filesystem (an NFS home) the manager waits for it
+// anyway. "" otherwise.
+func LateFS(dir, unitDir string) string {
+	var fs syscall.Statfs_t
+	if syscall.Statfs(dir, &fs) != nil {
+		return ""
+	}
+	kind := mountedLate[int64(fs.Type)]
+	if kind == "" {
+		return ""
+	}
+	var a, b syscall.Stat_t
+	if syscall.Stat(dir, &a) == nil && syscall.Stat(unitDir, &b) == nil && a.Dev == b.Dev {
+		return ""
+	}
+	return kind
+}

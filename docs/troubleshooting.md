@@ -79,6 +79,11 @@ once per machine:
 loginctl enable-linger
 ```
 
+A project on NFS, FUSE or another filesystem mounted after the user
+manager starts does not start at boot either. `up` warns about it, and the
+README's [project on a network filesystem](../README.md#a-project-on-a-network-filesystem)
+says what to do.
+
 Outside a login session, as from cron or `su`, `systemctl --user` needs
 `XDG_RUNTIME_DIR=/run/user/$(id -u)` to reach the manager. The verbs say
 so when they cannot reach it.

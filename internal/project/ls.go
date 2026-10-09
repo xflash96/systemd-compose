@@ -51,7 +51,7 @@ func List(m *systemd.Manager) error {
 			why := "files unreadable"
 			switch {
 			case os.IsNotExist(err) && exists(dir) && !exists(filepath.Join(dir, config.ConfigFileName)):
-				why = "yaml and rendered files gone; put the yaml back and run down there" // up there could not write them
+				why = "yaml and rendered files gone, or its filesystem not mounted; put them back and run down there" // up there could not write them
 			case os.IsNotExist(err) && exists(dir):
 				why = "rendered files gone; systemd-compose up there writes them again"
 			case os.IsNotExist(err):
@@ -158,7 +158,7 @@ func List(m *systemd.Manager) error {
 		config := p.config
 		if _, err := os.Stat(config); err != nil && !p.gone {
 			// no project verb reaches it from there until it is back
-			config += " (yaml gone: put it back and run down there; README, \"Moving or deleting a project\")"
+			config += " (yaml gone, or its filesystem not mounted: put it back and run down there; README, \"Moving or deleting a project\")"
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n", p.name, status, config)
 	}
