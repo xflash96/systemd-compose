@@ -308,6 +308,9 @@ func lineOf(msg string) int {
 	return n
 }
 
+// ServiceNameOK reports whether name may name a service.
+func ServiceNameOK(name string) bool { return reServiceName.MatchString(name) }
+
 // projectName is the one rule for a project name, wherever it comes from.
 func projectName(s, where string) error {
 	if !reProjectName.MatchString(s) {

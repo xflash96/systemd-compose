@@ -432,6 +432,36 @@ services run (and restart or failed), and its yaml; a project whose
 directory or yaml is gone says so.
 It works inside a project too.
 .TP
+.B import \fIUNIT\fR [\fISERVICE\fR]
+Print a
+.B systemd\-compose.yaml
+that runs the service unit
+.I UNIT
+of the user instance as the project's service
+.I SERVICE
+(the unit's name by default), then the commands that retire the unit.
+The directives of the unit file and of its own drop-ins go under
+.B unit:
+as written.
+.BR Environment= ,
+.B EnvironmentFile=
+and
+.B WorkingDirectory=
+become
+.BR environment: ,
+.B env_file:
+and
+.BR working_dir: ;
+without
+.BR WorkingDirectory= ,
+.B working_dir:
+is your home directory, where a user unit runs.
+.B Slice=
+and
+.B [Install]
+are left out, each with a note.
+It changes nothing, and exits 1 when the yaml would not load.
+.TP
 .BR version ", " \-\-version
 This program's version, then systemd's.
 .TP

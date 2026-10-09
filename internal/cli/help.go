@@ -110,7 +110,7 @@ func verbHelp(verb string) string {
 var reSection = regexp.MustCompile(`^(INSIDE A PROJECT|ANYWHERE|OUTSIDE A PROJECT)\b`)
 
 // ourVerbs are the verbs this program answers itself.
-var ourVerbs = []string{"up", "down", "ps", "logs", "start", "stop", "restart", "kill", "build", "run", "exec", "config", "top", "ls", "version", "help"}
+var ourVerbs = []string{"up", "down", "ps", "logs", "start", "stop", "restart", "kill", "build", "run", "exec", "config", "top", "ls", "import", "version", "help"}
 
 // systemctlVerbs pass through to systemctl unchanged.
 var systemctlVerbs = strings.Fields(`list-units list-automounts list-paths list-sockets list-timers

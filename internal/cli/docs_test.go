@@ -330,8 +330,8 @@ func TestContributingAndReadme_NameEveryPackageAndVerb(t *testing.T) {
 			t.Errorf("CONTRIBUTING.md does not name internal/%s", e.Name())
 		}
 	}
-	_, verbs, _ := strings.Cut(repoFile(t, "README.md"), "\n- Compose's verbs:")
-	verbs, _, _ = strings.Cut(verbs, "\n- ")
+	_, verbs, _ := strings.Cut(repoFile(t, "README.md"), "\n## Features\n")
+	verbs, _, _ = strings.Cut(verbs, "\n## ")
 	for _, v := range ourVerbs {
 		if v != "version" && v != "help" && !strings.Contains(verbs, "`"+v+"`") {
 			t.Errorf("README's features do not name %s", v)

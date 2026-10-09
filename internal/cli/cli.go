@@ -72,6 +72,9 @@ environment or the .env; * is all. down and stop take every profile.
 ANYWHERE:
 
   ls                       every project registered on the user instance
+  import UNIT [SERVICE]    a systemd-compose.yaml that runs a service unit of
+                           yours as a project's service, and the commands
+                           that retire the unit; it changes nothing
   version                  this program's version, then systemd's
 
 OUTSIDE A PROJECT: -p NAME acts on the project registered under NAME, as ls
@@ -166,6 +169,25 @@ parsed:
 			return err
 		}
 		return project.List(m)
+	case "import":
+		if system {
+			return fmt.Errorf("import reads a unit of the user instance, where projects live")
+		}
+		if f.File != "" || f.Name != "" || len(f.Profiles) > 0 {
+			return fmt.Errorf("import reads one unit of the user instance; -f, -p and --profile name a project and mean nothing to it")
+		}
+		if len(args) == 0 || len(args) > 2 || strings.HasPrefix(args[0], "-") {
+			return fmt.Errorf("import takes a unit and, if you like, the service's name: import UNIT [SERVICE]")
+		}
+		m := &systemd.Manager{User: true}
+		if err := m.Reachable(); err != nil {
+			return err
+		}
+		service := ""
+		if len(args) == 2 {
+			service = args[1]
+		}
+		return project.Import(m, args[0], service)
 	}
 	cfg := f.File
 	if cfg == "" {

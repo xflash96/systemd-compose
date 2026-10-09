@@ -352,3 +352,64 @@ func TestUnit_AsSystemdReadsIt(t *testing.T) {
 	q.write(fmt.Sprintf("name: NAME\nservices:\n  a: {command: [sleep, infinity], listen: [\"127.0.0.1:%[1]d\"], unit: {Socket: {ListenStream: \"127.0.0.1:%[1]d\"}}}\n", freePort(t)))
 	check(t, "an address in listen: and ListenStream= both is refused", q.sc("config").says("listed already"))
 }
+
+// TestImport_RunsTheUnitAsAProjectsService checks import's round trip: a
+// hand-written unit, imported and retired by the commands import prints,
+// runs the same command, in the same directory, with the same environment,
+// as a project's service.
+func TestImport_RunsTheUnitAsAProjectsService(t *testing.T) {
+	unit := prefix + "_hand.service"
+	out := filepath.Join(t.TempDir(), "out")
+	file := filepath.Join(unitDir, unit)
+	text := fmt.Sprintf(`[Unit]
+Description=a hand-written unit
+[Service]
+Environment="A=one two" B=$HOME
+Environment=C=3
+ExecStart=/bin/sh -c 'echo "$A|$B|$C|$(pwd)" > %s; exec sleep infinity'
+Nice=5
+[Install]
+WantedBy=default.target
+`, out)
+	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		systemctl("disable", "--now", unit)
+		os.Remove(file)
+		systemctl("daemon-reload")
+	})
+	systemctl("daemon-reload")
+	check(t, "the hand-written unit starts", systemctl("enable", "--now", unit).ok())
+	before := waitFile(out)
+	check(t, "  and writes its line", that(before != "", "no %s", out))
+	os.Remove(out)
+
+	p := newProject(t, "imp", "imp", "")
+	imp := run(p.dir, nil, sc, "import", unit)
+	check(t, "import exits 0", imp.ok())
+	p.file("systemd-compose.yaml", "name: "+p.name+"\n"+imp.out)
+	steps := 0
+	for _, l := range strings.Split(imp.out, "\n") {
+		if cmd, ok := strings.CutPrefix(l, "#   "); ok && !strings.HasPrefix(cmd, "(") && !strings.HasPrefix(cmd, "systemd-compose ") {
+			steps++
+			check(t, "  its step "+cmd, run("", nil, "sh", "-c", cmd).ok())
+		}
+	}
+	check(t, "  prints the steps that retire the unit", equal("steps", steps, 3))
+	check(t, "  which leave no unit file", missing(file))
+	check(t, "up of the import", p.sc("up").ok())
+	check(t, "  runs the same command the same way", equal("its line", waitFile(out), before))
+	check(t, "  with the unit's settings", equal("Nice", property(p.unit(strings.TrimSuffix(unit, ".service"), ".service"), "Nice"), "5"))
+}
+
+// waitFile is the file's text once it has a line, or "" after 10s.
+func waitFile(path string) string {
+	for i := 0; i < 100; i++ {
+		if b, err := os.ReadFile(path); err == nil && strings.HasSuffix(string(b), "\n") {
+			return string(b)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return ""
+}

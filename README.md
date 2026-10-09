@@ -34,6 +34,8 @@ the file. [Try it](#try-it) starts with a small one.
   (`resources` in [the keys](#writing-the-yaml)).
 - Profiles ([profiles](docs/profiles.md)), and several copies of one
   project under different names ([the project name](#the-project-name)).
+- `import` turns a unit you wrote by hand into a project's service
+  ([from a hand-written unit](#from-a-hand-written-unit)).
 - A JSON Schema, for completion and checks in an editor
   ([writing the yaml](#writing-the-yaml)).
 - One static binary, with no runtime dependency. It needs systemd 248 or
@@ -213,7 +215,8 @@ old name first: `sc -p OLDNAME down`.
 - **Hand-written unit files** give full control. systemd-compose writes the
   same files from one yaml, groups them in a slice and a target, shows a
   plan before it changes anything, and retires the units the yaml no longer
-  declares. `unit:` passes any systemd setting through.
+  declares. `unit:` passes any systemd setting through, and `sc import`
+  turns a unit file into a project's service.
 
 ## Status
 
@@ -254,6 +257,23 @@ mkdir -p ~/.config/systemd/user/demo-.service.d
 printf '[Service]\nNice=5\n' > ~/.config/systemd/user/demo-.service.d/nice.conf
 sc up              # checks the drop-in and reloads
 sc restart api db  # restart the services it should apply to
+```
+
+## From a hand-written unit
+
+`sc import foo` prints a yaml that runs `foo.service` as a project's
+service, then the commands that retire the unit. The unit's directives go
+under `unit:` as written; `Environment=`, `EnvironmentFile=` and
+`WorkingDirectory=` become their keys. Nothing changes until you run the
+commands:
+
+```
+cd ~/services/foo
+sc import foo > systemd-compose.yaml
+systemctl --user disable --now foo.service
+rm ~/.config/systemd/user/foo.service
+systemctl --user daemon-reload
+sc up              # foo runs as foo-foo.service, project foo
 ```
 
 ## Outside a project
