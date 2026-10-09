@@ -12,11 +12,11 @@ import (
 // Link links unit files where they are, without a reload: up reloads once
 // after all its links.
 func (m *Manager) Link(paths []string) error {
-	return m.Run(append([]string{"link", "--no-reload"}, paths...)...)
+	return m.Run(append([]string{"link", "--quiet", "--no-reload"}, paths...)...)
 }
 
 // Enable enables a unit: for a target, boot starts it.
-func (m *Manager) Enable(unit string) error { return m.Run("enable", unit) }
+func (m *Manager) Enable(unit string) error { return m.Run("enable", "--quiet", unit) }
 
 // Start starts the units in one transaction. systemd's own words on a
 // failure are returned, not printed: the caller explains the failure from

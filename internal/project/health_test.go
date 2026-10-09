@@ -144,20 +144,21 @@ func TestVerdict_StopFromElsewhereIsNoHealthcheckFailure(t *testing.T) {
 	}
 }
 
-// up's wait line names the healthcheck's budget, and the default
-// start_period when the yaml leaves it out.
-func TestHealthBudget_NotesTheDefaultStartPeriod(t *testing.T) {
+// up's wait line says, in the yaml's words, how long the healthcheck may
+// take: its start_period, the default named as one, and what a restart:
+// policy does when it fails.
+func TestHealthWait_SaysItInTheYamlsWords(t *testing.T) {
 	for _, c := range []struct {
 		startPeriod string
 		restart     *config.Restart
 		want        string
 	}{
-		{config.Default("healthcheck.start_period"), nil, "70s; start_period is 60s unless set, and a shorter one fails sooner"},
-		{config.Default("healthcheck.start_period"), &config.Restart{Policy: "always"}, "70s per attempt (restart: retries); start_period is 60s unless set, and a shorter one fails sooner"},
-		{"10s", nil, "20s"},
+		{config.Default("healthcheck.start_period"), nil, "until it passes or its start_period, 60s by default, runs out"},
+		{"30s", &config.Restart{Policy: "always", Written: "unless-stopped"}, "until it passes or its start_period, 30s, runs out; if it fails, restart: unless-stopped starts it again"},
+		{"1min", &config.Restart{Policy: "no", Written: "no"}, "until it passes or its start_period, 60s, runs out"},
 	} {
 		svc := &config.Service{Restart: c.restart, Healthcheck: &config.Healthcheck{StartPeriod: c.startPeriod, Timeout: "5s"}}
-		if got := healthBudget(svc); got != c.want {
+		if got := healthWait(svc); got != c.want {
 			t.Errorf("start_period %s: %q, want %q", c.startPeriod, got, c.want)
 		}
 	}

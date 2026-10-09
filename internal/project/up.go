@@ -801,9 +801,9 @@ func (pr *project) startAll(pl *upPlan) (upResult, error) {
 		switch u := pr.p.ServiceUnit(s); {
 		case s.Healthcheck == nil:
 		case !pl.before[u].Active() || restarting[u]:
-			fmt.Printf("  %s: waiting for its healthcheck, up to %s\n", u, healthBudget(s))
+			fmt.Printf("  %s: waiting for its healthcheck, %s\n", u, healthWait(s))
 		case pl.before[u].ActiveState == "activating":
-			fmt.Printf("  %s: starting already; waiting for its healthcheck, up to %s from its start\n", u, healthBudget(s))
+			fmt.Printf("  %s: starting already; waiting for its healthcheck, %s\n", u, healthWait(s))
 		}
 	}
 	acted = append(append(acted, pl.toRestart...), pl.bounced...)

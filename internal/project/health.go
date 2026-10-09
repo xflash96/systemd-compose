@@ -154,15 +154,19 @@ func healthOf(st systemd.UnitState, probeExit int) string {
 	return "-"
 }
 
-// healthBudget is how long a start waits for a service's healthcheck: the
-// TimeoutStartSec= the renderer writes, once per attempt.
-func healthBudget(s *config.Service) string {
-	b := fmt.Sprintf("%ds", s.Healthcheck.StartTimeout())
+// healthWait says how long a start waits for a service's healthcheck, in
+// the yaml's terms: the probe runs the test until it passes or
+// start_period runs out (TimeoutStartSec= is a backstop a little past
+// that), and a failed probe is a failed start, which a restart: policy
+// retries.
+func healthWait(s *config.Service) string {
+	sp, _ := config.Seconds(s.Healthcheck.StartPeriod)
+	w := fmt.Sprintf("until it passes or its start_period, %ds, runs out", sp)
+	if s.Healthcheck.StartPeriod == config.Default("healthcheck.start_period") {
+		w = fmt.Sprintf("until it passes or its start_period, %ds by default, runs out", sp)
+	}
 	if s.Restart != nil && s.Restart.Policy != "no" {
-		b += " per attempt (restart: retries)"
+		w += "; if it fails, restart: " + s.Restart.Written + " starts it again"
 	}
-	if d := config.Default("healthcheck.start_period"); s.Healthcheck.StartPeriod == d {
-		b += "; start_period is " + d + " unless set, and a shorter one fails sooner"
-	}
-	return b
+	return w
 }

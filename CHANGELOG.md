@@ -17,6 +17,10 @@ Each release of systemd-compose, newest first.
   `.systemd-compose/`, so they load at boot while the project's filesystem
   (NFS, FUSE) is not mounted yet. `up` warns when a project there is
   registered with links.
+- `up` no longer prints systemctl's "Created symlink" line for each unit
+  after its plan has said so. Its healthcheck line says how long it waits
+  in the yaml's terms: until the test passes or `start_period` runs out,
+  and what the service's `restart:` does if it fails.
 - Outside a project, `-p NAME` acts on the project registered under that
   name, wherever its yaml is, as compose's `-p` does: `sc -p demo logs
   -f` from any directory.
