@@ -259,8 +259,8 @@ func TestNames_SystemdsOwnAndTwins(t *testing.T) {
 	check(t, "  and the project's own unit name, unregistered, is no outsider", t1.sc("reset-failed", unit).lacks("not of project"))
 }
 
-// TestRegistration_CopiesLoadWithoutTheProject checks registration: copy:
-// the units are files of their own, so systemd keeps them loaded while
+// TestRegistration_CopiesLoadWithoutTheProject checks registration: copy,
+// the default: the units are files of their own, so systemd keeps them loaded while
 // the project's directory is gone (a filesystem not mounted), and -p NAME
 // reaches them from elsewhere. up switches between copies and links
 // either way, the target's boot link following; an orphan's copy is
@@ -269,7 +269,7 @@ func TestRegistration_CopiesLoadWithoutTheProject(t *testing.T) {
 	yaml := func(reg, extra string) string {
 		return "name: NAME\n" + reg + "services:\n  a: {command: [sleep, infinity]}\n" + extra
 	}
-	p := newProject(t, "cp", "cp", yaml("registration: copy\n", ""))
+	p := newProject(t, "cp", "cp", yaml("", ""))
 	unit := p.unit("a", ".service")
 	isCopy := func(name string) error {
 		st, err := os.Lstat(filepath.Join(unitDir, name))
@@ -284,7 +284,7 @@ func TestRegistration_CopiesLoadWithoutTheProject(t *testing.T) {
 		return t
 	}
 
-	check(t, "up of a project with registration: copy", p.sc("up").shows(regexp.QuoteMeta(unit)+` +new +copy, start`))
+	check(t, "up of a project", p.sc("up").shows(regexp.QuoteMeta(unit)+` +new +copy, start`))
 	check(t, "  copies its units", isCopy(unit))
 	check(t, "  and the target's boot link names the copy", equal("wants", wants(), filepath.Join(unitDir, p.name+".target")))
 	check(t, "  ps says copied", p.sc("ps").shows(regexp.QuoteMeta(unit)+` +loaded +active +running +copied`))
@@ -297,20 +297,28 @@ func TestRegistration_CopiesLoadWithoutTheProject(t *testing.T) {
 	systemctl("daemon-reload")
 	check(t, "with the directory gone and a reload, the unit stays loaded", equal("LoadState", property(unit, "LoadState"), "loaded"))
 	check(t, "  and -p NAME ps elsewhere shows it", run(t.TempDir(), nil, sc, "-p", p.name, "ps").shows(regexp.QuoteMeta(unit)+` +loaded +active`))
+	check(t, "  ls says up starts it once it is back", run("", nil, sc, "ls").shows(regexp.QuoteMeta(p.name)+" .*its filesystem not mounted: once it is back, up there starts it again"))
+	check(t, "  and up of the same yaml elsewhere names it as gone", newProject(t, "cp2", "cp", yaml("", "")).sc("up").says("whose files are gone .*: moved, deleted or not mounted"))
 	if err := os.Rename(away, p.dir); err != nil {
 		t.Fatal(err)
 	}
 
-	p.write(yaml("", ""))
-	check(t, "up without registration: links in place of the copies", p.sc("up").shows(regexp.QuoteMeta(unit)+` +unchanged +link, in place of its copy`))
+	p.write(yaml("registration: link\n", ""))
+	check(t, "up with registration: link links in place of the copies", p.sc("up").shows(regexp.QuoteMeta(unit)+` +unchanged +link, in place of its copy`))
 	check(t, "  the unit is a link", isLink(unit))
 	check(t, "  the target's boot link names its render file", that(strings.HasSuffix(wants(), "/.systemd-compose/"+p.name+".target"), "wants %s", wants()))
 	check(t, "  and the service ran on", p.sc("ps").shows(regexp.QuoteMeta(unit)+` +loaded +active +running`))
 
-	p.write(yaml("registration: copy\n", "  b: {command: [sleep, infinity]}\n"))
-	check(t, "up with registration: copy again copies in place of the links", p.sc("up").shows(regexp.QuoteMeta(unit)+` +unchanged +copy, in place of its link`))
+	p.write(yaml("", "  b: {command: [sleep, infinity]}\n"))
+	check(t, "up without it copies again in place of the links", p.sc("up").shows(regexp.QuoteMeta(unit)+` +unchanged +copy, in place of its link`))
 	check(t, "  the unit is a copy", isCopy(unit))
-	p.write(yaml("registration: copy\n", ""))
+	check(t, "  and the next up finds it unchanged", p.sc("up", "--dry-run").shows(regexp.QuoteMeta(unit)+` +unchanged`))
+	if err := os.Remove(filepath.Join(unitDir, unit)); err != nil {
+		t.Fatal(err)
+	}
+	check(t, "up copies again a copy removed by hand", p.sc("up").ok())
+	check(t, "  and the next up finds it unchanged", p.sc("up", "--dry-run").shows(regexp.QuoteMeta(unit)+` +unchanged`))
+	p.write(yaml("", ""))
 	check(t, "up --force retires a dropped service's copy", p.sc("up", "--force").shows("retired orphan "+regexp.QuoteMeta(p.unit("b", ".service"))))
 	check(t, "  and removes it", missing(filepath.Join(unitDir, p.unit("b", ".service"))))
 	check(t, "down", p.sc("down").ok())

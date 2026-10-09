@@ -116,8 +116,8 @@ func (pr *project) stopRegistered(args []string) error {
 
 // movedFrom finds the yaml this project's directory was moved away from
 // without a down: its render directory holds files whose marker names a
-// yaml that is gone, and the units of that name are still linked to the
-// files' old place. "" when there is none.
+// yaml that is gone, and the units of that name are still registered from
+// the files' old place. "" when there is none.
 func (pr *project) movedFrom(unitDir string) (yaml, name string) {
 	entries, err := os.ReadDir(pr.renderDir)
 	if err != nil {
@@ -142,7 +142,7 @@ func (pr *project) movedFrom(unitDir string) (yaml, name string) {
 type registration struct {
 	kind   string // "none" | "ours" | "project" | "foreign"
 	owner  string // for "project": the other yaml; for "foreign": what sits there
-	gone   bool   // for "project": its files are gone (moved or deleted)
+	gone   bool   // for "project": its files are gone (moved, deleted, not mounted)
 	masked bool   // for "foreign": a link to /dev/null
 	copied bool   // for "ours": a copy, not a link (registration: copy)
 }
@@ -176,7 +176,7 @@ func registered(unitDir, name string) (link, bool) {
 	if st.Mode().IsRegular() {
 		data, err := os.ReadFile(p)
 		m := render.ReadMarker(string(data))
-		if err != nil || m.Project == "" || m.Config == "" {
+		if err != nil || m.Project == "" || !filepath.IsAbs(m.Config) {
 			return link{}, false
 		}
 		return link{name, filepath.Join(filepath.Dir(m.Config), config.RenderDirName, name), string(data), nil}, true
@@ -300,16 +300,23 @@ func (pr *project) registrationOf(unitDir, name string) registration {
 			return registration{kind: "ours", copied: copied}
 		}
 		m := render.ReadMarker(l.text)
+		// a link dangles when the project's files are gone; a copy names a
+		// yaml that is
+		gone := os.IsNotExist(l.err)
+		if copied {
+			_, err := os.Stat(m.Config)
+			gone = os.IsNotExist(err)
+		}
 		owner := "another project (" + l.target + ")"
 		switch {
+		case gone:
+			owner = "a project whose files are gone (" + filepath.Dir(filepath.Dir(l.target)) + ": moved, deleted or not mounted)"
 		case copied:
 			owner = "project " + m.Project + " from " + m.Config + " (a copy)"
-		case os.IsNotExist(l.err):
-			owner = "a project whose files are gone (" + filepath.Dir(filepath.Dir(l.target)) + ": moved or deleted)"
 		case l.err == nil && m.Config != "":
 			owner = "project " + m.Project + " from " + m.Config
 		}
-		return registration{kind: "project", owner: owner, gone: os.IsNotExist(l.err)}
+		return registration{kind: "project", owner: owner, gone: gone}
 	}
 	if copied {
 		return registration{kind: "foreign", owner: "a regular file at " + p + " (hand-written?)"}

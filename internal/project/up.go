@@ -206,17 +206,22 @@ func (pr *project) upChecks(dryRun bool) error {
 // upNotes says what up finds of an earlier up that went missing: rendered
 // files gone, or the directory moved without a down.
 func (pr *project) upNotes(unitDir string) {
-	missing := 0
+	missing, linked := 0, false
 	for _, n := range pr.p.UnitNames() {
-		if pr.registrationOf(unitDir, n).kind == "ours" && !exists(filepath.Join(pr.renderDir, n)) {
+		if r := pr.registrationOf(unitDir, n); r.kind == "ours" && !exists(filepath.Join(pr.renderDir, n)) {
 			missing++
+			linked = linked || !r.copied // a copy is the baseline itself
 		}
 	}
 	if missing > 0 {
-		fmt.Printf("note: %s (a git clean?): up writes them again, and with nothing to compare against, what runs reads changed (no baseline)\n", goneFiles(missing))
+		why := ""
+		if linked {
+			why = ", and with nothing to compare against, what runs reads changed (no baseline)"
+		}
+		fmt.Printf("note: %s (a git clean?): up writes them again%s\n", goneFiles(missing), why)
 	}
-	if kind := systemd.LateFS(pr.p.Dir, unitDir); kind != "" && pr.p.Registration != "copy" {
-		fmt.Printf("WARNING: this project is on %s, and its units are links into it: when the user manager starts before %s is mounted (at boot), they are missing, and the project does not start, then or once it is mounted. registration: copy in the yaml registers copies instead; README, \"A project on a network filesystem\"\n", kind, kind)
+	if kind := systemd.LateFS(pr.p.Dir, unitDir); kind != "" && pr.p.Registration == "link" {
+		fmt.Printf("WARNING: this project is on %s, and registration: link makes its units links into it: when the user manager starts before %s is mounted (at boot), they are missing, and the project does not start, then or once it is mounted. Without registration: link, up registers copies; README, \"A project on a network filesystem\"\n", kind, kind)
 	}
 	if cfg, name := pr.movedFrom(unitDir); cfg != "" && name != pr.p.Name {
 		fmt.Printf("WARNING: this directory was moved from %s without a down, and project %s is still registered from there: this up starts a second copy, as project %s. README, \"Moving or deleting a project\", moves one\n", filepath.Dir(cfg), name, pr.p.Name)
@@ -479,11 +484,11 @@ const (
 // it alike.
 func (pr *project) changeOf(name, text string, st systemd.UnitState) (string, error) {
 	svc := pr.serviceByUnit(name)
-	old, err := os.ReadFile(filepath.Join(pr.renderDir, name))
+	old, err := os.ReadFile(pr.baseline(name))
 	switch {
 	case os.IsNotExist(err) && st.Active():
-		// The render file is gone but the unit runs: there is no baseline
-		// to compare against, so the safe reading is "changed".
+		// The file is gone but the unit runs: there is no baseline to
+		// compare against, so the safe reading is "changed".
 		return changeNoBaseline, nil
 	case os.IsNotExist(err) && st.Known() && st.UnitFileState != "":
 		// registered, its file gone (a git clean): not new, and not
@@ -514,7 +519,20 @@ func (pr *project) changeOf(name, text string, st systemd.UnitState) (string, er
 // unit (a start that failed elsewhere, an interrupt, on_change:
 // start-only).
 func (pr *project) notApplied(svc *config.Service, name string, st systemd.UnitState) bool {
-	return pr.restartable(svc, name) && st.Active() && st.StartedBefore(mtime(filepath.Join(pr.renderDir, name)))
+	return pr.restartable(svc, name) && st.Active() && st.StartedBefore(mtime(pr.baseline(name)))
+}
+
+// baseline is the file a rendered unit is compared with: the one systemd
+// loads. That is the copy when the project's unit is one (an edit there by
+// hand, or systemctl edit --full, is a change up undoes, and a git clean of
+// the render files is none), else the render file a link leads to.
+func (pr *project) baseline(name string) string {
+	if unitDir, err := pr.m.UnitDir(); err == nil {
+		if r := pr.registrationOf(unitDir, name); r.kind == "ours" && r.copied {
+			return filepath.Join(unitDir, name)
+		}
+	}
+	return filepath.Join(pr.renderDir, name)
 }
 
 // restartable is a unit up restarts when it changes: the unit that stands
@@ -719,9 +737,9 @@ func (pr *project) writeAndRegister(pl *upPlan) error {
 	for _, u := range pl.spared {
 		byDesign[u] = true
 	}
+	ranAlready := map[string]time.Time{}
 	for _, u := range pr.rendered {
-		path := filepath.Join(pr.renderDir, u.Name)
-		if err := systemd.WriteUnit(path, u.Text); err != nil {
+		if err := systemd.WriteUnit(filepath.Join(pr.renderDir, u.Name), u.Text); err != nil {
 			return err
 		}
 		// A running unit whose file was gone, and that this up may not
@@ -729,12 +747,21 @@ func (pr *project) writeAndRegister(pl *upPlan) error {
 		// is taken as that, or "changed (not applied)" would hold it, and
 		// what waits on it, forever.
 		if st := pl.before[u.Name]; (!baseline[u.Name] && byDesign[u.Name] || pl.envRead[u.Name]) && st.Active() && !st.Started.IsZero() {
-			if err := os.Chtimes(path, st.Started, st.Started); err != nil {
+			ranAlready[u.Name] = st.Started
+		}
+	}
+	if err := pr.register(pl.unitDir, pr.rendered); err != nil {
+		return err
+	}
+	// backdated once registered: the baseline may be the copy
+	for name, t := range ranAlready {
+		for _, path := range []string{filepath.Join(pr.renderDir, name), pr.baseline(name)} {
+			if err := os.Chtimes(path, t, t); err != nil {
 				return err
 			}
 		}
 	}
-	return pr.register(pl.unitDir, pr.rendered)
+	return nil
 }
 
 // register puts rendered units in the unit directory as registration:
@@ -759,8 +786,22 @@ func (pr *project) register(unitDir string, units []render.Rendered) error {
 		}
 		if !copies {
 			paths = append(paths, path)
-		} else if err := systemd.WriteUnit(filepath.Join(unitDir, u.Name), u.Text); err != nil {
+			continue
+		}
+		// A new copy (a link replaced, or one removed by hand) keeps the
+		// render file's time, as cp -p would: the copy is the baseline from
+		// now on, and one newer than a running unit's start would make the
+		// next up take what it already runs for a change not applied.
+		dst := filepath.Join(unitDir, u.Name)
+		_, err := os.Lstat(dst)
+		fresh := os.IsNotExist(err)
+		if err := systemd.WriteUnit(dst, u.Text); err != nil {
 			return err
+		}
+		if st, err := os.Stat(path); fresh && err == nil {
+			if err := os.Chtimes(dst, st.ModTime(), st.ModTime()); err != nil {
+				return err
+			}
 		}
 	}
 	if len(paths) > 0 {

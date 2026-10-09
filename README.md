@@ -44,9 +44,8 @@ the file. [Try it](#try-it) starts with a small one.
 ## How it works
 
 `up` writes a unit file per service into `.systemd-compose/` beside the
-yaml, links the files into `~/.config/systemd/user/` (or copies them, for
-[a project on a network filesystem](#a-project-on-a-network-filesystem)),
-and starts the project. For a project named `demo`:
+yaml, copies the files into `~/.config/systemd/user/`, and starts the
+project. For a project named `demo`:
 
 ```
 demo.slice                 the cgroup every service runs in, with the project's caps
@@ -233,8 +232,11 @@ CI tests it on systemd 249 (Ubuntu 22.04) and 255 (Ubuntu 24.04).
 ## Moving or deleting a project
 
 Take a project down before you move or delete its directory. Its units are
-registered from files inside it. If you have moved it already, move it back
-and run `down` there, or remove the units by hand. Set `N` to the project
+registered as that directory's: moved or deleted, they fail to start at
+boot, and `up` in a new place refuses them. If you have moved or deleted
+it already, `sc -p NAME down` from anywhere retires them. With
+`registration: link`, move it back and run `down` there, or remove the
+units by hand. Set `N` to the project
 name as `sc ls` shows it, with each `-` written `\x2d`:
 
 ```
@@ -244,20 +246,33 @@ rm ~/.config/systemd/user/"$N"[.-]* ~/.config/systemd/user/default.target.wants/
 systemctl --user daemon-reload
 ```
 
-systemd warns during the stop that the unit files changed on disk. That is
-expected.
+systemd may warn during the stop that the unit files changed on disk. That
+is expected.
 
 ## A project on a network filesystem
 
-`up` registers each unit as a link to its file in `.systemd-compose/`. On
-NFS, FUSE or another filesystem mounted after your user manager starts,
-those links are missing at boot, and the project does not start, then or
-once the filesystem is mounted. `up` warns about it. There are two ways
-out.
+`up` copies each unit into `~/.config/systemd/user/`, so systemd loads it
+at boot wherever the project lives. On NFS, FUSE or another filesystem
+mounted after your user manager starts, a service whose files are there
+fails to start at boot until it is mounted. Then `sc up` in the project,
+or `sc -p NAME up` from anywhere, starts it; a `restart:` with a delay
+retries it on its own:
 
-Keep the project's directory on a local disk, and link the yaml into it
-from the repository. A `systemd-compose.yaml` that is a symlink makes a
-project where the link is, not where the yaml is.
+```yaml
+services:
+  api:
+    command: [python3, app.py]
+    restart: {policy: always, delay: 10s}
+```
+
+`registration: link` registers links to the files in `.systemd-compose/`
+instead. On such a filesystem they are missing at boot, and the project
+does not start, then or once the filesystem is mounted; `up` warns about
+it.
+
+To keep the yaml in a repository there and the project on a local disk,
+link the yaml into a local directory. A `systemd-compose.yaml` that is a
+symlink makes a project where the link is, not where the yaml is.
 
 ```
 mkdir -p ~/services/demo && cd ~/services/demo
@@ -265,23 +280,11 @@ ln -s /mnt/nfs/src/demo/systemd-compose.yaml .
 sc up
 ```
 
-Or set `registration: copy` in the yaml. `up` then copies the units into
-`~/.config/systemd/user/`, and systemd loads them at boot. A service whose
-files are on the filesystem fails to start until it is mounted; a
-`restart:` with a delay retries it:
-
-```yaml
-registration: copy
-services:
-  api:
-    command: [python3, app.py]
-    restart: {policy: always, delay: 10s}
-```
-
 ## Local changes
 
-`up` rewrites `.systemd-compose/`, so do not edit the files there. For a
-change of your own, use a systemd drop-in. A `.conf` file in
+`up` rewrites `.systemd-compose/` and the units it copied into
+`~/.config/systemd/user/`, so do not edit those files. For a change of
+your own, use a systemd drop-in. A `.conf` file in
 `~/.config/systemd/user/demo-.service.d/` applies to every service of
 project `demo`, and one in `demo-api.service.d/` to api alone. `up` checks
 drop-ins with the units, but restarts nothing for them:

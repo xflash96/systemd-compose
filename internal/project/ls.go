@@ -154,7 +154,7 @@ func List(m *systemd.Manager) error {
 		config := p.config
 		if _, err := os.Stat(config); err != nil && !p.gone {
 			// no project verb reaches it from there until it is back
-			config += " (yaml gone, or its filesystem not mounted: put it back and run down there; README, \"Moving or deleting a project\")"
+			config += " (yaml gone, or its filesystem not mounted: once it is back, up there starts it again; systemd-compose -p " + p.name + " down retires it)"
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n", p.name, status, config)
 	}

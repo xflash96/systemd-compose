@@ -94,7 +94,7 @@ services:
 	check(t, "  and no build unit is left", equal("build units", strings.TrimSpace(systemctl("list-units", "--all", "--plain", "--no-legend", "build-"+p.name+"-*").out), ""))
 }
 
-// A project unit still running that nothing registers (its link removed
+// A project unit still running that nothing registers (its file removed
 // by hand) fails down, which names it, and says what it did.
 func TestDown_FailsForAStrayUnit(t *testing.T) {
 	p := newProject(t, "st", "st", `name: NAME
@@ -103,16 +103,21 @@ services:
 `)
 	target, s := p.name+".target", p.unit("s", ".service")
 	t.Cleanup(func() { systemctl("stop", s, target) })
+	unregister := func(name string) {
+		os.Remove(filepath.Join(unitDir, name))
+		os.Remove(filepath.Join(unitDir, "default.target.wants", name))
+		systemctl("daemon-reload")
+	}
 	check(t, "up of a project", p.sc("up").ok())
-	systemctl("disable", target)
+	unregister(target)
 	r := p.sc("down")
-	check(t, "  down with its target unlinked by hand but active exits nonzero and names it", firstErr(r.fails(), r.says(regexp.QuoteMeta(target)+" .*still running, though nothing registers it")))
+	check(t, "  down with its target unregistered by hand but active exits nonzero and names it", firstErr(r.fails(), r.says(regexp.QuoteMeta(target)+" .*still running, though nothing registers it")))
 	systemctl("stop", target)
 	check(t, "  and once it is stopped, down exits 0", p.sc("down").ok())
 	check(t, "up of it again", p.sc("up").ok())
-	systemctl("disable", s)
+	unregister(s)
 	r = p.sc("down")
-	check(t, "  down with its service unlinked by hand but running exits nonzero, says so, and what it did", firstErr(r.fails(), r.says("still running, though nothing registers it"), r.says(`^down: .*unregistered`)))
+	check(t, "  down with its service unregistered by hand but running exits nonzero, says so, and what it did", firstErr(r.fails(), r.says("still running, though nothing registers it"), r.says(`^down: .*unregistered`)))
 	systemctl("stop", s)
 	check(t, "  and once it is stopped, down exits 0", p.sc("down").ok())
 }

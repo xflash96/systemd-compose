@@ -115,7 +115,7 @@ func (pr *project) down(args []string) error {
 		if n == pr.p.SliceName() || !st[n].Running() || r.kind != "none" && !r.masked {
 			continue
 		}
-		why := "its link was removed by hand"
+		why := "its registration was removed by hand"
 		if r.masked {
 			why = "it is masked"
 		}

@@ -197,15 +197,15 @@
       "anyOf": [
         {
           "enum": [
-            "link",
-            "copy"
+            "copy",
+            "link"
           ]
         },
         {
           "$ref": "#/definitions/interpolated"
         }
       ],
-      "description": "How up registers the units. link: links in your unit directory to the files in .systemd-compose/. copy: copies of those files, which load at boot even while the project's filesystem is not mounted (NFS, FUSE). Default: link."
+      "description": "How up registers the units in your unit directory. copy: copies of the files in .systemd-compose/, which load at boot wherever the project lives, even while its filesystem is not mounted (NFS, FUSE). link: links to those files, missing at boot while it is not. Default: copy."
     },
     "resources": {
       "$ref": "#/definitions/resourcesMap",

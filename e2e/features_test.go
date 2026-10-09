@@ -252,9 +252,10 @@ func TestStart_NamesStoppedDependents(t *testing.T) {
 
 // TestYamlGone_PointsTheWayBack checks that a directory whose project's
 // yaml and rendered files are gone points the way back, since the verbs
-// there act on the user instance.
+// there act on the user instance. Links, whose files are what is gone;
+// TestRegistration_CopiesLoadWithoutTheProject has the copies.
 func TestYamlGone_PointsTheWayBack(t *testing.T) {
-	p := newProject(t, "yg", "yg", "name: NAME\nservices:\n  a: {command: [sleep, infinity]}\n")
+	p := newProject(t, "yg", "yg", "name: NAME\nregistration: link\nservices:\n  a: {command: [sleep, infinity]}\n")
 	away := filepath.Dir(p.dir)
 	moves := [][2]string{
 		{p.path("systemd-compose.yaml"), filepath.Join(away, "yg.yaml")},
@@ -282,9 +283,9 @@ func TestYamlGone_PointsTheWayBack(t *testing.T) {
 
 // TestProjectName_FromAnywhere checks that -p NAME outside a project acts
 // on the project registered under NAME, as compose's -p does, and that
-// it names a project registered from files it cannot read.
+// it names a project registered with links to files it cannot read.
 func TestProjectName_FromAnywhere(t *testing.T) {
-	p := newProject(t, "pa", "pa", "name: NAME\nservices:\n  a: {command: [sleep, infinity]}\n")
+	p := newProject(t, "pa", "pa", "name: NAME\nregistration: link\nservices:\n  a: {command: [sleep, infinity]}\n")
 	elsewhere := t.TempDir()
 	check(t, "up of a project", p.sc("up").ok())
 	check(t, "  -p NAME ps elsewhere shows its units", run(elsewhere, nil, sc, "-p", p.name, "ps").shows(regexp.QuoteMeta(p.unit("a", ".service"))+` +loaded +active`))

@@ -546,16 +546,16 @@ has these top-level keys:
 and
 .BR services .
 .B up
-registers each unit as a link to its file in
+registers each unit as a copy of its file in
 .B .systemd\-compose/
 when
 .B registration
 is
-.B link
-(the default), and as a copy of the file when it is
-.BR copy .
-systemd loads copies at boot even while the project's filesystem (NFS,
-FUSE) is not mounted yet;
+.B copy
+(the default), and as a link to the file when it is
+.BR link .
+systemd loads copies at boot wherever the project lives, even while its
+filesystem (NFS, FUSE) is not mounted yet;
 .B up
 warns about links into such a filesystem.
 A key starting with
@@ -769,13 +769,13 @@ and
 .B .systemd-compose/
 Beside the yaml: the rendered units, which
 .B up
-writes and links; it ignores itself in git.
+writes and copies; it ignores itself in git.
 .TP
 .B ~/.config/systemd/user/
-The links
+The copies
 .B up
-makes to the rendered units (or their copies, with
-.BR "registration: copy" ),
+makes of the rendered units (or links to them, with
+.BR "registration: link" ),
 and
 .BI default.target.wants/ PROJECT .target\fR,
 which starts the project at boot (with lingering).

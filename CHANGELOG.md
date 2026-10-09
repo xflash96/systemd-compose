@@ -15,10 +15,11 @@ Each release of systemd-compose, newest first.
 - `import UNIT` prints a `systemd-compose.yaml` that runs a unit you wrote
   by hand as a project's service, and the commands that retire the unit
   and any unit that starts it, a timer or a socket, whose text it prints.
-- `registration: copy` registers copies of the units instead of links to
-  `.systemd-compose/`, so they load at boot while the project's filesystem
-  (NFS, FUSE) is not mounted yet. `up` warns when a project there is
-  registered with links.
+- `up` registers copies of the units in `.systemd-compose/` instead of
+  links to them, so they load at boot wherever the project lives, even
+  while its filesystem (NFS, FUSE) is not mounted yet; a project's next
+  `up` replaces its links. `registration: link` keeps links, and `up`
+  warns when a project with links is on such a filesystem.
 - `up` no longer prints systemctl's "Created symlink" line for each unit
   after its plan has said so. Its healthcheck line says how long it waits
   in the yaml's terms: until the test passes or `start_period` runs out,

@@ -168,7 +168,7 @@ parsed:
 	}
 	if cfg != "" {
 		if system {
-			return fmt.Errorf("--system is refused inside a project (%s): projects live on the user instance, which cannot link files under /home into /etc", cfg)
+			return fmt.Errorf("--system is refused inside a project (%s): projects live on the user instance: their services are yours, not the system's", cfg)
 		}
 		// Before the yaml is read: a wrong flag is answered even while the
 		// file does not load yet.
@@ -208,7 +208,7 @@ func yamlGone(m *systemd.Manager) {
 	}
 	for {
 		if name := from[filepath.Join(dir, config.RenderDirName)]; name != "" {
-			fmt.Printf("note: project %s is registered from %s, whose %s is gone (or its filesystem is not mounted): put it back and run down there, or see README, \"Moving or deleting a project\"; this verb acts on the user instance\n", name, dir, config.ConfigFileName)
+			fmt.Printf("note: project %s is registered from %s, whose %s is gone (or its filesystem is not mounted): put it back and run down there, or systemd-compose -p %s down; README, \"Moving or deleting a project\"; this verb acts on the user instance\n", name, dir, config.ConfigFileName, name)
 			return
 		}
 		parent := filepath.Dir(dir)

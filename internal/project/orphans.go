@@ -195,7 +195,7 @@ func (pr *project) unregister(units []string) (stopped int, err error) {
 			return 0, fmt.Errorf("daemon-reload: %w", err)
 		}
 		first, _, _ := strings.Cut(strings.TrimSpace(said), "\n")
-		fmt.Printf("  (systemctl disable failed: %s; the links were removed by hand instead)\n", first)
+		fmt.Printf("  (systemctl disable failed: %s; the registrations were removed by hand instead)\n", first)
 	}
 	if len(copies) > 0 {
 		for _, u := range copies {

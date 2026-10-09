@@ -47,7 +47,7 @@ line per service that is not up, with the reason:
 
 ```
 UNIT                    LOAD    ACTIVE  SUB      HEALTH  REGISTERED
-demo-api.service        loaded  active  running  ready   linked
+demo-api.service        loaded  active  running  ready   copied
 ```
 
 - ACTIVE and SUB are systemd's states. A `oneshot` that has run is
@@ -55,8 +55,8 @@ demo-api.service        loaded  active  running  ready   linked
 - HEALTH is shown for a service with a healthcheck: `starting`, `ready`
   (the test passed once), `probe failed`, `program exited`, `failed` or
   `restarting`.
-- REGISTERED is `linked` for a service (`copied` with `registration:
-  copy`), `enabled` for the target, which boot starts. A scheduled job's
+- REGISTERED is `copied` for a service (`linked` with `registration:
+  link`), `enabled` for the target, which boot starts. A scheduled job's
   timer shows its next run.
 
 ## Changes that are not applied
@@ -81,10 +81,11 @@ once per machine:
 loginctl enable-linger
 ```
 
-A project on NFS, FUSE or another filesystem mounted after the user
-manager starts does not start at boot either. `up` warns about it, and the
-README's [project on a network filesystem](../README.md#a-project-on-a-network-filesystem)
-says what to do.
+On NFS, FUSE or another filesystem mounted after the user manager starts,
+a project's units load at boot, but a service whose files are there fails
+until it is mounted; `up` then starts it. The README's
+[project on a network filesystem](../README.md#a-project-on-a-network-filesystem)
+says more.
 
 Outside a login session, as from cron or `su`, `systemctl --user` needs
 `XDG_RUNTIME_DIR=/run/user/$(id -u)` to reach the manager. The verbs say

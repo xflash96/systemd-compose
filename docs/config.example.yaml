@@ -51,13 +51,13 @@ resources:
   pids: 512
 
 # registration: how up registers the units in your unit directory
-# - optional, default: link
-# - link: links to the files up writes in .systemd-compose/
-# - copy: copies of those files, which systemd loads at boot even while
-#   the project's filesystem is not mounted yet (NFS, FUSE); a service
-#   whose files are there fails to start until it is, and a restart:
-#   delay retries it
-registration: link
+# - optional, default: copy
+# - copy: copies of the files up writes in .systemd-compose/, which
+#   systemd loads at boot wherever the project lives, even while its
+#   filesystem is not mounted yet (NFS, FUSE); a service whose files are
+#   there fails to start until it is, and a restart: delay retries it
+# - link: links to those files, missing at boot while it is not mounted
+registration: copy
 
 # x-ANYTHING: ignored, at the top level or inside a service
 # - optional
