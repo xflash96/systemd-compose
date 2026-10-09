@@ -67,6 +67,10 @@ needs docker 28 or later with cgroup v2.
 
 ## Releases
 
+Before 1.0, the middle number goes up only for a change that breaks a yaml
+or a command line that worked before. Anything else, new features too, is
+a release of the last number, such as `v0.1.1`.
+
 A maintainer adds the version's section to `CHANGELOG.md`, then pushes the
-tag, such as `v0.2.0`. CI tests the tag, builds the archives with
+tag, such as `v0.1.1`. CI tests the tag, builds the archives with
 goreleaser, and publishes them with that section as the release notes.
