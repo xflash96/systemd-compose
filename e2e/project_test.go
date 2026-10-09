@@ -144,6 +144,8 @@ func TestProject(t *testing.T) {
 	check(t, "status --help reaches systemctl's help", p.sc("status", "--help").shows("status"))
 	check(t, "list-timers with a mistyped service is refused", p.sc("list-timers", "jbo").fails())
 	check(t, "documented: help up", parses(p.sc("help", "up")))
+	check(t, "documented: help yaml prints the key reference", p.sc("help", "yaml").shows(`^registration: link$`))
+	check(t, "documented: help man prints the manual", p.sc("help", "man").shows(`^THE PROJECT FILE$`))
 	check(t, "documented: kill -s CONT", parses(p.sc("kill", "-s", "CONT", "web")))
 	check(t, "documented: run -T, exec -T", parses(p.sc("exec", "-T", "web", "true")))
 	check(t, "documented: -p NAME, --project-name=NAME", parses(p.sc("--project-name="+name, "-p", name, "ps")))

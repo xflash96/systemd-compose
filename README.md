@@ -97,6 +97,9 @@ go install github.com/xflash96/systemd-compose@latest    # -> $(go env GOPATH)/b
 make install                                            # from a clone: ~/.local/bin, and the man page
 ```
 
+`go install` installs no man page. `sc help man` prints the manual, and
+`sc help yaml` every key, from the binary.
+
 The directory must be on your `PATH`. The examples below use a short alias:
 
 ```
@@ -319,8 +322,10 @@ sc restart foo    # any other verb passes through to systemctl --user
 ## Documentation
 
 - `man systemd-compose` ([docs/systemd-compose.1](docs/systemd-compose.1)):
-  every verb, flag, file and exit status. `sc help VERB` shows one verb.
-- [docs/config.example.yaml](docs/config.example.yaml): every key.
+  every verb, flag, file and exit status. `sc help VERB` shows one verb's
+  entry, and `sc help man` the whole manual.
+- [docs/config.example.yaml](docs/config.example.yaml), or `sc help yaml`:
+  every key.
 - Guides: [coming from docker compose](docs/compose.md),
   [dependencies and healthchecks](docs/dependencies.md),
   [scheduled jobs](docs/scheduled-jobs.md), [profiles](docs/profiles.md),

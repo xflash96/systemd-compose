@@ -9,11 +9,11 @@ import (
 	"github.com/xflash96/systemd-compose/internal/systemd"
 )
 
-// VERB --help and help VERB print that verb's lines in each section that
-// has it.
-func TestVerbHelp_PrintsTheVerbsLines(t *testing.T) {
+// VERB --help and help VERB print the manual's entry for that verb in
+// each section that has one: its flags too, which the overview leaves out.
+func TestVerbHelp_PrintsTheVerbsEntries(t *testing.T) {
 	up := verbHelp("up")
-	for _, want := range []string{"INSIDE A PROJECT:", "up [--dry-run]", "OUTSIDE A PROJECT:", "up UNIT...", "systemd-compose help"} {
+	for _, want := range []string{"INSIDE A PROJECT:", "up [--dry-run]", "--wait-timeout T\n", "OUTSIDE A PROJECT:", "up UNIT...", "systemd-compose help"} {
 		if !strings.Contains(up, want) {
 			t.Errorf("verbHelp(up) lacks %q:\n%s", want, up)
 		}
@@ -32,8 +32,11 @@ func TestHelpFor_AnswersVerbsAndRefusesOtherWords(t *testing.T) {
 	if verbHelp("frobnicate") != "" || helpFor("frobnicate") == nil || !strings.Contains(fmt.Sprint(helpFor("lgos")), `did you mean "logs"`) {
 		t.Error("help for a word that is no verb is an error")
 	}
-	if helpFor("status") != nil || !strings.Contains(verbHelp("exec"), "run [-e K=V]") {
-		t.Error("help for a systemctl verb, and for exec, answers")
+	if helpFor("status") != nil || !strings.Contains(verbHelp("exec"), "exec [-e KEY=VAL]") || !strings.Contains(verbHelp("ls"), "ANYWHERE:") {
+		t.Error("help for a systemctl verb, for exec and for ls answers")
+	}
+	if helpFor("yaml") != nil || helpFor("man") != nil {
+		t.Error("help yaml and help man answer")
 	}
 }
 

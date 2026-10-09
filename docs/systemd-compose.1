@@ -367,6 +367,8 @@ A one-off whose client goes away is stopped with it.
 .B config
 The yaml, then every unit as it would be rendered.
 It needs no user manager.
+.B help yaml
+shows every key the yaml takes, with its rules.
 .TP
 .B top \fR[\fISERVICE\fR] [\fIARGS\fR...]
 .BR systemd-cgtop (1)
@@ -465,11 +467,16 @@ It changes nothing, and exits 1 when the yaml would not load.
 .BR version ", " \-\-version
 This program's version, then systemd's.
 .TP
-.B help \fR[\fIVERB\fR]
-The help text, or one verb's lines.
-.I VERB
+.B help \fR[\fIVERB\fR|\fByaml\fR|\fBman\fR]
+The overview of every verb;
+.IR VERB 's
+entry in this manual
+.RI ( VERB
 .B \-\-help
-shows them too, for one of this program's verbs.
+shows it too);
+.BR docs/config.example.yaml ,
+every key of the file with its rules; or this whole manual.
+The binary carries both documents, so they need no installed man page.
 .SS Outside a project
 On the user instance (the system instance when run as root, or with
 .BR \-\-system ).

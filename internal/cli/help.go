@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -32,16 +31,24 @@ func wantsHelp(verb string, args []string) bool {
 	return false
 }
 
-// helpFor answers `help WORD`: the help text's lines for one of this
-// program's verbs, a line for one systemctl's that passes through, and an
-// error for a word that is neither, so help tells which verbs exist.
+// helpFor answers `help WORD`: the manual's entry for one of this
+// program's verbs, the key reference for yaml, the whole manual for man, a
+// line for a verb of systemctl's that passes through, and an error for a
+// word that is none of them, so help tells which verbs exist.
 func helpFor(verb string) error {
-	if text := verbHelp(verb); text != "" {
-		fmt.Print(text)
+	switch verb {
+	case "yaml":
+		fmt.Print(docs.Keys)
+		return nil
+	case "man":
+		fmt.Print(renderMan(docs.Man))
+		return nil
+	case "help":
+		fmt.Print(help)
 		return nil
 	}
-	if verb == "help" {
-		fmt.Print(help)
+	if text := verbHelp(verb); text != "" {
+		fmt.Print(text)
 		return nil
 	}
 	if verb == "cancel" {
@@ -63,51 +70,18 @@ func helpFor(verb string) error {
 	if err := unknownVerb(verb); err != nil {
 		return fmt.Errorf("help: %w", err)
 	}
-	return fmt.Errorf("help: no verb %q (help lists the verbs)", verb)
+	return fmt.Errorf("help: no verb %q (help lists the verbs; help yaml shows every key of the file, help man the whole manual)", verb)
 }
 
-// verbHelp is the part of the help text about one verb: its lines in every
-// section that has it, or "" for a word the help does not know.
+// verbHelp is the manual's entries for one of this program's verbs, in
+// each section that has one, or "" for a word it has none for.
 func verbHelp(verb string) string {
-	if verb == "exec" {
-		verb = "run" // one line says both
-	}
-	var out, section []string
-	header := ""
-	lines := strings.Split(help, "\n")
-	for i := 0; i < len(lines); i++ {
-		l := lines[i]
-		if m := reSection.FindString(l); m != "" {
-			header, section = m, nil
-			continue
-		}
-		if !strings.HasPrefix(l, "  ") || strings.HasPrefix(l, "   ") {
-			continue
-		}
-		head := strings.Fields(l)[0]
-		for _, v := range strings.Split(head, "|") {
-			if v == verb {
-				section = append(section, l)
-				for i+1 < len(lines) && strings.HasPrefix(lines[i+1], "    ") {
-					i++
-					section = append(section, lines[i])
-				}
-				out = append(out, header+":")
-				out = append(out, section...)
-				out = append(out, "")
-				section = nil
-				break
-			}
-		}
-	}
-	if len(out) == 0 {
+	text := manEntries(docs.Man, verb)
+	if text == "" {
 		return ""
 	}
-	return strings.Join(out, "\n") + "(systemd-compose help: everything)\n"
+	return text + "(systemd-compose help: every verb; help man: the whole manual; help yaml: every key)\n"
 }
-
-// reSection is one of the help text's three section headings.
-var reSection = regexp.MustCompile(`^(INSIDE A PROJECT|ANYWHERE|OUTSIDE A PROJECT)\b`)
 
 // ourVerbs are the verbs this program answers itself.
 var ourVerbs = []string{"up", "down", "ps", "logs", "start", "stop", "restart", "kill", "build", "run", "exec", "config", "top", "ls", "import", "version", "help"}

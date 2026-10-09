@@ -19,7 +19,9 @@ import (
 const help = `systemd-compose — docker-compose verbs over systemd.
 
   systemd-compose [--system|-s|--user] [-f FILE] [-p NAME] [--profile NAME]... VERB [ARGS...]
-  systemd-compose help VERB       (or VERB --help) for one verb
+  systemd-compose help VERB       (or VERB --help) one verb, from the manual
+  systemd-compose help yaml       every key of systemd-compose.yaml, with its rules
+  systemd-compose help man        the whole manual (the man page, if it is not installed)
 
 INSIDE A PROJECT (a systemd-compose.yaml here or in any parent directory, as
 compose finds its file, or the one -f names) every verb is scoped to it, on
@@ -276,9 +278,10 @@ func setFile(f *project.Flags, path string) error {
 }
 
 // Main runs the command line and returns the exit code. stamp is the
-// version a release build was stamped with, "" for any other build.
-func Main(args []string, stamp string) int {
-	version = stamp
+// version a release build was stamped with, "" for any other build; d the
+// documents help prints.
+func Main(args []string, stamp string, d Docs) int {
+	version, docs = stamp, d
 	code, msg := outcome(run(args))
 	if msg != "" {
 		fmt.Fprintln(os.Stderr, "systemd-compose:", msg)
