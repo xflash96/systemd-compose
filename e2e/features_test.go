@@ -279,6 +279,27 @@ func TestYamlGone_PointsTheWayBack(t *testing.T) {
 	check(t, "  put back, down exits 0", p.sc("down").ok())
 }
 
+// TestProjectName_FromAnywhere checks that -p NAME outside a project acts
+// on the project registered under NAME, as compose's -p does, and that
+// it names a project registered from files it cannot read.
+func TestProjectName_FromAnywhere(t *testing.T) {
+	p := newProject(t, "pa", "pa", "name: NAME\nservices:\n  a: {command: [sleep, infinity]}\n")
+	elsewhere := t.TempDir()
+	check(t, "up of a project", p.sc("up").ok())
+	check(t, "  -p NAME ps elsewhere shows its units", run(elsewhere, nil, sc, "-p", p.name, "ps").shows(regexp.QuoteMeta(p.unit("a", ".service"))+` +loaded +active`))
+	moved := p.dir + ".moved"
+	if err := os.Rename(p.dir, moved); err != nil {
+		t.Fatal(err)
+	}
+	check(t, "  moved away, -p NAME says its files cannot be read", run(elsewhere, nil, sc, "-p", p.name, "ps").says("registered from .*whose files cannot be read"))
+	if err := os.Rename(moved, p.dir); err != nil {
+		t.Fatal(err)
+	}
+	check(t, "  put back, -p NAME down elsewhere exits 0", run(elsewhere, nil, sc, "-p", p.name, "down").ok())
+	check(t, "  and unregisters it", equal("links", p.links(), 0))
+	check(t, "-p with no such project is refused", run(elsewhere, nil, sc, "-p", p.name, "ps").says("no project "+p.name+" is registered"))
+}
+
 // TestStop_SendSIGKILLNo checks that a service SendSIGKILL=no leaves
 // running past its stop timeout is not reported stopped.
 func TestStop_SendSIGKILLNo(t *testing.T) {

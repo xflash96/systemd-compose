@@ -26,7 +26,7 @@ func List(m *systemd.Manager) error {
 	if err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(unitDir)
+	links, err := renderLinks(unitDir)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -39,16 +39,9 @@ func List(m *systemd.Manager) error {
 	}
 	byKey := map[string]*project{}
 	var keys []string
-	for _, e := range entries {
-		if e.Type()&os.ModeSymlink == 0 {
-			continue
-		}
-		target, err := os.Readlink(filepath.Join(unitDir, e.Name()))
-		if err != nil || filepath.Base(filepath.Dir(target)) != config.RenderDirName {
-			continue
-		}
-		data, err := os.ReadFile(target)
-		m := render.ReadMarker(string(data))
+	for _, l := range links {
+		target, err := l.target, l.err
+		m := render.ReadMarker(l.text)
 		name, where, service := m.Project, m.Config, m.Service
 		gone := err != nil || name == ""
 		if gone {
@@ -64,7 +57,7 @@ func List(m *systemd.Manager) error {
 			case os.IsNotExist(err):
 				why = "directory gone; README, \"Moving or deleting a project\""
 			}
-			name, service, _ = strings.Cut(strings.TrimSuffix(e.Name(), filepath.Ext(e.Name())), "-")
+			name, service, _ = strings.Cut(strings.TrimSuffix(l.name, filepath.Ext(l.name)), "-")
 			name = config.UnescapeName(name)
 			where = dir + " (" + why + ")"
 		}
@@ -80,7 +73,7 @@ func List(m *systemd.Manager) error {
 		if _, dup := p.services[service]; !dup {
 			p.order = append(p.order, service)
 		}
-		p.services[service] = append(p.services[service], e.Name())
+		p.services[service] = append(p.services[service], l.name)
 	}
 	if len(keys) == 0 {
 		fmt.Println("no project is registered on the user instance")

@@ -38,7 +38,8 @@ type project struct {
 }
 
 // cmdAs is cmd under another project name: the -f and --profile given
-// stay, since a -p alone outside the project's directory is refused.
+// stay, since a -p alone outside the project's directory finds the
+// project registered under that name, not this yaml.
 func (pr *project) cmdAs(name string) string {
 	f := pr.sel
 	f.Name = name

@@ -74,9 +74,10 @@ ANYWHERE:
   ls                       every project registered on the user instance
   version                  this program's version, then systemd's
 
-OUTSIDE A PROJECT: the same words on the user instance (the system instance
-when run as root); --system or -s for the system instance explicitly, --user
-for your user instance as root.
+OUTSIDE A PROJECT: -p NAME acts on the project registered under NAME, as ls
+lists it, wherever its yaml is. Without it, the same words act on the user
+instance (the system instance when run as root); --system or -s for the
+system instance explicitly, --user for your user instance as root.
 
   ps [-a] [PATTERN]        list-units --type=service,timer   (-a: stopped too)
   logs [-f] [UNIT...]      journalctl, one -u per UNIT; no UNIT = the whole journal
@@ -170,6 +171,17 @@ parsed:
 	if cfg == "" {
 		cfg = config.FindConfig(".")
 	}
+	if cfg == "" && f.Name != "" {
+		// compose's -p: the project of that name, wherever it is
+		found, err := project.RegisteredConfig(f.Name)
+		if err != nil {
+			return err
+		}
+		if found == "" {
+			return fmt.Errorf("no project %s is registered on the user instance (ls lists them), and there is %s", f.Name, noYAML)
+		}
+		cfg = found
+	}
 	if cfg != "" {
 		if system {
 			return fmt.Errorf("--system is refused inside a project (%s): projects live on the user instance, which cannot link files under /home into /etc", cfg)
@@ -182,8 +194,8 @@ parsed:
 		}
 		return project.Run(cfg, verb, args, f)
 	}
-	if f.Name != "" || len(f.Profiles) > 0 {
-		return fmt.Errorf("-p and --profile belong to a project, and there is %s", noYAML)
+	if len(f.Profiles) > 0 {
+		return fmt.Errorf("--profile belongs to a project, and there is %s", noYAML)
 	}
 	// User instance by default, system as root; either flag is explicit.
 	m := &systemd.Manager{User: !system && (user || os.Getuid() != 0)}

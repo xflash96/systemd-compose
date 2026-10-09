@@ -138,6 +138,11 @@ is refused.
 .TP
 .BI \-p " NAME" "\fR, \fP\-\-project\-name " NAME
 The project name, before every other source.
+Outside a project, the project registered under
+.IR NAME ,
+wherever its yaml is:
+.B systemd\-compose \-p demo logs \-f
+works from any directory.
 .TP
 .BI \-\-profile " NAME"
 Activate a profile; repeatable;

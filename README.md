@@ -189,6 +189,10 @@ A name is letters, digits, `_` and `-`. Units spell a `-` of the name as
 `my\x2dapp-api.service`. A directory named `my-app` gives the name
 `my_app`; `name: my-app` keeps the dash.
 
+Outside the project's directory, `-p NAME` acts on the project registered
+under that name, as `sc ls` lists it: `sc -p demo logs -f` works from
+anywhere.
+
 Renaming a project leaves the old units running. Take them down under the
 old name first: `sc -p OLDNAME down`.
 

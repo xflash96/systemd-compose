@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/xflash96/systemd-compose/internal/config"
@@ -157,9 +158,9 @@ type link struct {
 	err                error
 }
 
-// linksInto are the links in unitDir that point into renderDir: the units
-// registered from that directory's files. err is the unit directory's.
-func linksInto(unitDir, renderDir string) ([]link, error) {
+// renderLinks are the links in unitDir into any render directory: the
+// units of every project registered. err is the unit directory's.
+func renderLinks(unitDir string) ([]link, error) {
 	entries, err := os.ReadDir(unitDir)
 	if err != nil {
 		return nil, err
@@ -170,13 +171,63 @@ func linksInto(unitDir, renderDir string) ([]link, error) {
 			continue
 		}
 		target, err := os.Readlink(filepath.Join(unitDir, e.Name()))
-		if err != nil || filepath.Dir(target) != renderDir {
+		if err != nil || filepath.Base(filepath.Dir(target)) != config.RenderDirName {
 			continue
 		}
 		data, err := os.ReadFile(target)
 		out = append(out, link{e.Name(), target, string(data), err})
 	}
 	return out, nil
+}
+
+// linksInto are the links in unitDir that point into renderDir: the units
+// registered from that directory's files. err is the unit directory's.
+func linksInto(unitDir, renderDir string) ([]link, error) {
+	all, err := renderLinks(unitDir)
+	var out []link
+	for _, l := range all {
+		if filepath.Dir(l.target) == renderDir {
+			out = append(out, l)
+		}
+	}
+	return out, err
+}
+
+// RegisteredConfig is the yaml project name is registered from, as its
+// units' markers say, for -p NAME outside a project: compose's -p reaches
+// a project from anywhere. "" when no project of that name is registered.
+func RegisteredConfig(name string) (string, error) {
+	unitDir, err := (&systemd.Manager{User: true}).UnitDir()
+	if err != nil {
+		return "", err
+	}
+	links, err := renderLinks(unitDir)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	var configs []string
+	unreadable := ""
+	for _, l := range links {
+		if m := render.ReadMarker(l.text); l.err == nil && m.Project != "" {
+			if m.Project == name && !slices.Contains(configs, m.Config) {
+				configs = append(configs, m.Config)
+			}
+			continue
+		}
+		// no marker to read: the unit's name says the project
+		if prefix, _, _ := strings.Cut(strings.TrimSuffix(l.name, filepath.Ext(l.name)), "-"); config.UnescapeName(prefix) == name {
+			unreadable = filepath.Dir(filepath.Dir(l.target))
+		}
+	}
+	switch {
+	case len(configs) > 1:
+		return "", fmt.Errorf("project %s is registered from %s; -f names the yaml to act on", name, strings.Join(configs, " and "))
+	case len(configs) == 1:
+		return configs[0], nil
+	case unreadable != "":
+		return "", fmt.Errorf("project %s is registered from %s, whose files cannot be read now (moved, deleted, or on a filesystem that is not mounted); README, \"Moving or deleting a project\"", name, unreadable)
+	}
+	return "", nil
 }
 
 // registrationOf classifies <unitDir>/<name>: a symlink to this project's

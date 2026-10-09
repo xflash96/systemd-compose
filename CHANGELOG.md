@@ -8,6 +8,9 @@ Each release of systemd-compose, newest first.
   `systemd-escape` does: project `my-app` has `my\x2dapp-api.service`
   and `my\x2dapp.slice`. A directory named `my-app` still gives the name
   `my_app`.
+- Outside a project, `-p NAME` acts on the project registered under that
+  name, wherever its yaml is, as compose's `-p` does: `sc -p demo logs
+  -f` from any directory.
 
 ## v0.1.0
 
