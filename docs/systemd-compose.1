@@ -442,6 +442,7 @@ with no job named are refused too, because they act on the whole instance.
 Every project registered on the user instance: its name, how many of its
 services run (and restart or failed), and its yaml; a project whose
 directory or yaml is gone says so.
+A scheduled job counts as running while its timer is armed.
 It works inside a project too.
 .TP
 .B import \fIUNIT\fR [\fISERVICE\fR]

@@ -29,8 +29,10 @@ name=systemd-compose_${ver#v}_linux_$arch
 url=https://github.com/$repo/releases/download/$ver
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-curl -fsSL -o "$tmp/$name.tar.gz" "$url/$name.tar.gz"
-curl -fsSL -o "$tmp/SHA256SUMS" "$url/SHA256SUMS"
+for f in "$name.tar.gz" SHA256SUMS; do
+	curl -fsSL -o "$tmp/$f" "$url/$f" ||
+		{ echo "install.sh: could not download $url/$f (a release is named like v0.1.1)" >&2; exit 1; }
+done
 (cd "$tmp" && grep " $name.tar.gz\$" SHA256SUMS | sha256sum -c --quiet -) ||
 	{ echo "install.sh: $name.tar.gz does not match SHA256SUMS" >&2; exit 1; }
 tar -C "$tmp" -xzf "$tmp/$name.tar.gz"

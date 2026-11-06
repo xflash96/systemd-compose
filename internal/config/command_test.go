@@ -20,3 +20,18 @@ func TestLoad_TakesShellSyntaxInQuotesAsTheProgramsOwn(t *testing.T) {
 		}
 	}
 }
+
+// systemd reads a word \; as a literal ; argument, the one find -exec
+// ends with, so it is no shell syntax.
+func TestLoad_TakesSystemdsEscapedSemicolon(t *testing.T) {
+	p, err := loadYAML(t, `services: {a: {command: 'find . -name "*.x" -exec rm {} \;'}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Service("a").Command.Line; got != `find . -name "*.x" -exec rm {} \;` {
+		t.Errorf("command line %q", got)
+	}
+	if _, err := loadYAML(t, `services: {a: {command: 'a \; b ;'}}`); err == nil {
+		t.Error("a bare ; beside a \\; loaded")
+	}
+}

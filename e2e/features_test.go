@@ -195,16 +195,24 @@ func TestUp_EnvFileReadAlready(t *testing.T) {
 	check(t, "  down exits 0", p.sc("down").ok())
 }
 
-// TestUp_RenamedSocketService checks that a socket-activated service
-// renamed with its address comes up with up --force: the old socket and
-// service are retired before the new socket binds the address.
-func TestUp_RenamedSocketService(t *testing.T) {
+// TestUp_RenamedService checks that a service renamed with its address
+// comes up with up --force, whether a socket holds the address or the
+// program binds it itself: the orphans go before the start.
+func TestUp_RenamedService(t *testing.T) {
 	yaml, port := "name: NAME\nservices:\n  %s: {command: [sleep, infinity], listen: [\"127.0.0.1:%d\"]}\n", freePort(t)
 	p := newProject(t, "rnm", "rnm", fmt.Sprintf(yaml, "web", port))
 	check(t, "up of a socket-activated service", p.sc("up").ok())
 	p.write(fmt.Sprintf(yaml, "web2", port))
 	check(t, "  renamed, keeping its address: up --force exits 0", p.sc("up", "--force").ok())
 	check(t, "  and the new socket listens", active(p.unit("web2", ".socket")))
+	check(t, "  down exits 0", p.sc("down").ok())
+
+	yaml, port = "name: NAME\nservices:\n  %s: {command: [python3, -m, http.server, --bind, 127.0.0.1, \"%d\"], restart: always}\n", freePort(t)
+	p = newProject(t, "rnp", "rnp", fmt.Sprintf(yaml, "web", port))
+	check(t, "up of a service that binds its port", p.sc("up").ok())
+	p.write(fmt.Sprintf(yaml, "web2", port))
+	check(t, "  renamed: up --force exits 0", p.sc("up", "--force").ok())
+	check(t, "  and the new one runs", p.sc("ps").shows("^"+regexp.QuoteMeta(p.unit("web2", ".service"))+` +loaded +active +running`))
 	check(t, "  down exits 0", p.sc("down").ok())
 }
 
@@ -318,6 +326,20 @@ services:
 	kill()
 	time.Sleep(time.Second)
 	check(t, "  once killed, down exits 0", p.sc("down").ok())
+
+	p = newProject(t, "km", "km", `name: NAME
+services:
+  s:
+    command: [sh, -c, "sleep 600 & exec sleep 600"]
+    unit: {Service: {KillMode: process}}
+`)
+	kill = func() { systemctl("kill", "-s", "KILL", p.unit("s", ".service")) }
+	t.Cleanup(kill)
+	check(t, "up of a service whose KillMode= kills only its main process", p.sc("up").ok())
+	down := p.sc("down")
+	check(t, "  down exits nonzero and names what it left", firstErr(down.fails(), down.says("still running: its stop left processes of it running")))
+	check(t, "  without blaming a stop timeout", down.lacks("stop timeout"))
+	kill()
 }
 
 // TestUnit_AsSystemdReadsIt checks unit: and drop-ins as systemd reads

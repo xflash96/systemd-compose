@@ -38,6 +38,22 @@ services:
 	check(t, "  the job turned into a service while it runs: up exits 0", p.sc("up").ok())
 	check(t, "  and the service runs its new definition", p.sc("ps").says("^"+regexp.QuoteMeta(job)+` .* active *running`))
 	check(t, "  down of that project exits 0", p.sc("down").ok())
+
+	p = newProject(t, "gr", "gr", `name: NAME
+services:
+  job:
+    command: [sh, -c, "exit 4"]
+    restart: {policy: on-failure, delay: 60s}
+    schedule: "2099-01-01 00:00:00"
+`)
+	job = p.unit("job", ".service")
+	check(t, "up of a job that retries a failed run", p.sc("up").ok())
+	systemctl("start", "--no-block", job)
+	time.Sleep(2 * time.Second)
+	check(t, "  ps says its run failed and a retry waits", p.sc("ps").says(regexp.QuoteMeta(job)+` .*its last run failed, and systemd runs it again soon`))
+	check(t, "  stop says it stopped the retry", p.sc("stop", "job").says(regexp.QuoteMeta(job)+` +stopped: its last run failed, and the retry it waited for will not run`))
+	check(t, "  and keeps the failed run's result", equal("Result", property(job, "Result"), "exit-code"))
+	check(t, "  down exits 0", p.sc("down").ok())
 }
 
 // A changed oneshot still running when up comes is restarted without

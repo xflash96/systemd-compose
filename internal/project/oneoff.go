@@ -618,7 +618,8 @@ func envFileQuote(v string) string {
 	return b.String()
 }
 
-// runtimeDir is this user's runtime directory.
+// terminal reports whether f is a terminal: run and exec take a pty only
+// when both ends are one.
 func terminal(f *os.File) bool {
 	st, err := f.Stat()
 	return err == nil && st.Mode()&os.ModeCharDevice != 0

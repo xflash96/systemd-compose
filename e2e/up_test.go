@@ -237,6 +237,7 @@ func TestNames_SystemdsOwnAndTwins(t *testing.T) {
 	check(t, "  top before up says nothing of it runs", t1.sc("top").says("nothing of project "+name+" runs"))
 	check(t, "up of a project with a twin elsewhere", t1.sc("up").ok())
 	check(t, "  a systemctl verb with no service named is refused, not run on the instance", t1.sc("reset-failed").says("acts on the whole user instance"))
+	check(t, "  and so is disable with none, in the tool's words", t1.sc("disable").says("up registers the project's units and down unregisters them"))
 	check(t, "  one that changes units, given what is not the project's, is refused", t1.sc("reset-failed", "*").says("acts outside this project"))
 	check(t, "  given the project's own unit name, it passes", t1.sc("reset-failed", unit).ok())
 	check(t, "  a flag's value as a word of its own is refused", t1.sc("reset-failed", "--job-mode", "replace", "s").says("write it as --job-mode=VALUE"))

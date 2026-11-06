@@ -281,7 +281,7 @@ func parseRestart(n *yaml.Node, ctx string) (*Restart, error) {
 		r.Policy = "always"
 	case slices.Contains(restartPolicy.Words, r.Policy):
 	case strings.HasPrefix(r.Policy, "on-failure:"):
-		return nil, fmt.Errorf("line %d: %s: restart: %q has no faithful systemd form: docker counts automatic restarts and forgets them on a manual start, systemd's start limit counts every start, manual ones included; write restart: on-failure and set unit: Unit: StartLimitBurst: and StartLimitIntervalSec: yourself", n.Line, ctx, r.Policy)
+		return nil, fmt.Errorf("line %d: %s: restart: %q %s", n.Line, ctx, r.Policy, retryCount)
 	default:
 		return nil, fmt.Errorf("line %d: %s: restart: %q; use %s", n.Line, ctx, r.Policy, orList(restartPolicy.Words))
 	}

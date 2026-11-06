@@ -3,7 +3,7 @@
 systemd listens on the port (`hello-hello.socket`) and hands the socket to
 hello.py. A restart replaces the program but not the socket, so
 connections made while it restarts wait in the socket's backlog instead
-of being refused. It needs python3.
+of being refused. It needs python3 and curl.
 
 ```sh
 cd examples/socket

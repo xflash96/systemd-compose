@@ -29,6 +29,8 @@ func TestVerdict_NamesWhatWentWrong(t *testing.T) {
 		{systemd.UnitState{ActiveState: "failed", ExitCode: 1, Exit: 3}, nil, -1, "failed to start (it exited with status 3)"},
 		{systemd.UnitState{ActiveState: "failed", ExitCode: 2, Exit: 15}, hc, 1, "failed to start: its healthcheck did not pass (last probe exit 1)"},
 		{systemd.UnitState{ActiveState: "failed", ExitCode: 1, Exit: 1}, hc, probe.MainGone, "failed to start: the program exited before its healthcheck passed"},
+		// the reason ends the verdict: up adds "; see ..." after it
+		{systemd.UnitState{ActiveState: "failed", ExitCode: 2, Exit: 15}, hc, probe.TimedOut, "failed to start: its healthcheck test ran past the healthcheck's timeout"},
 		{systemd.UnitState{ActiveState: "active", SubState: "running", NRestarts: 2}, nil, -1, "keeps restarting (restart #2); it did not stay up 3s while watched"},
 		// up 3s since the program last started: a retry that worked
 		{systemd.UnitState{ActiveState: "active", SubState: "running", NRestarts: 2, Started: time.Now(), Ran: time.Now().Add(-4 * time.Second)}, nil, -1, ""},

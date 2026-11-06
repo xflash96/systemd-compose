@@ -132,7 +132,11 @@ func shellSyntax(cmd, ctx string, line int, shellLine, home string) error {
 	for _, w := range unquotedWords(cmd) {
 		// A shell reads an operator standing alone, or at a word's edge
 		// (>log, 2>/dev/null, |tee, cmd&, a;); in the middle of a word
-		// (--max=1>2, a|b as a regex) it is the program's argument.
+		// (--max=1>2, a|b as a regex) it is the program's argument. systemd
+		// reads \; as a literal ; argument (find -exec ends with one).
+		if w == `\;` {
+			continue
+		}
 		bare := w == ";" || w == "&&" || w == "||" || w == "&" || w == "|"
 		if bare || reRedirect.MatchString(w) || strings.HasPrefix(w, "|") || strings.HasSuffix(w, ";") || strings.HasSuffix(w, "&") || strings.HasSuffix(w, "|") {
 			return fmt.Errorf("line %d: %s: %q is shell syntax, and systemd runs no shell: write a shell line as %s", line, ctx, w, shellLine)

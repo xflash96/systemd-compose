@@ -98,7 +98,7 @@ func verdict(st systemd.UnitState, svc *config.Service, probeExit int) string {
 	case failed && probeExit == probe.MainGone:
 		return "failed to start: the program exited before its healthcheck passed"
 	case failed && probeExit == probe.TimedOut:
-		return "failed to start: its healthcheck test ran past its timeout:"
+		return "failed to start: its healthcheck test ran past the healthcheck's timeout"
 	case failed && probeExit > 0:
 		return fmt.Sprintf("failed to start: its healthcheck did not pass (last probe exit %d)%s", probeExit, lowPids(svc))
 	case failed && st.Result == "oom-kill":

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -53,6 +54,11 @@ func IsProbe(execStartPost string) bool {
 // Run is the probe verb: probe [--watch] [--interval D] [--timeout D]
 // [--retries N] [--start-period D] [--start-interval D] -- TEST...
 func Run(args []string) error {
+	// The probe and its watch run in the service's cgroup, where pids:
+	// counts their threads. Go's grow with GOMAXPROCS (the collector's
+	// workers are a quarter of it), which is the machine's CPU count; one
+	// keeps them to the few docs/dependencies.md names, on any machine.
+	runtime.GOMAXPROCS(1)
 	interval, timeout, startPeriod, startInterval := config.Default("healthcheck.interval"), config.Default("healthcheck.timeout"), config.Default("healthcheck.start_period"), config.Default("healthcheck.start_interval")
 	retries := config.Default("healthcheck.retries")
 	flags := map[string]*string{"--interval": &interval, "--timeout": &timeout, "--retries": &retries, "--start-period": &startPeriod, "--start-interval": &startInterval}

@@ -243,6 +243,9 @@ func Run(cfg, verb string, args []string, f Flags) error {
 			return fmt.Errorf("%s with no service named acts on the whole user instance, not this project: name a service (%s), or use systemctl --user %s for the instance", verb, strings.Join(p.ServiceNames(), ", "), verb)
 		}
 	}
+	if slices.Contains(Registers, verb) && !namesAUnit(args) && !slices.Contains(args, "--help") && !slices.Contains(args, "-h") {
+		return fmt.Errorf("%s: up registers the project's units and down unregisters them; systemctl --user %s UNIT for a unit outside the project", verb, verb)
+	}
 	// A service name maps to its unit only when that unit is ours; the
 	// name of a unit somebody else registered is never handed to a verb.
 	unitDir, err := pr.m.UnitDir()

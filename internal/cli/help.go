@@ -80,7 +80,7 @@ func verbHelp(verb string) string {
 	if text == "" {
 		return ""
 	}
-	return text + "(systemd-compose help: every verb; help man: the whole manual; help yaml: every key)\n"
+	return text + "(systemd-compose help: every verb; help man: the manual; help yaml: every key)\n"
 }
 
 // ourVerbs are the verbs this program answers itself.

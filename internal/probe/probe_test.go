@@ -202,6 +202,37 @@ func TestRun_LeavesTheWatchAfterAPassedStart(t *testing.T) {
 	t.Errorf("%s outlived the program and the watch's SIGTERM", statePath(id))
 }
 
+// The watch runs in the service's cgroup, where pids: counts its threads,
+// and docs/dependencies.md gives their number so a cap can be sized. Go's
+// threads grow with GOMAXPROCS, the machine's CPU count: GOMAXPROCS=64
+// stands in for a large machine. The collector's workers start with its
+// first run, which in a watch comes once it has run a while
+// (PROBE_TEST_COLLECT, TestMain).
+func TestWatch_HoldsFewThreadsOnAnyMachine(t *testing.T) {
+	w := exec.Command(os.Args[0], Verb, "--watch", "--interval", "1s", "--", "true")
+	w.Env = append(os.Environ(), "GOMAXPROCS=64", "GOGC=off", "PROBE_TEST_COLLECT=1")
+	if err := w.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { w.Process.Kill(); w.Wait() }()
+	most := 0
+	for end := time.Now().Add(4 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", w.Process.Pid))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range strings.Split(string(data), "\n") {
+			if n, ok := strings.CutPrefix(l, "Threads:"); ok {
+				k, _ := strconv.Atoi(strings.TrimSpace(n))
+				most = max(most, k)
+			}
+		}
+	}
+	if most > 8 {
+		t.Errorf("the watch ran %d threads on a 64-CPU machine; docs/dependencies.md says 8", most)
+	}
+}
+
 // A state is a live watch's only: not one whose watch is gone, nor one
 // whose pid another process has now. A start prunes the others.
 func TestReadState_TakesOnlyALiveWatch(t *testing.T) {

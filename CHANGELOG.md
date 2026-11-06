@@ -2,6 +2,29 @@
 
 Each release of systemd-compose, newest first.
 
+## Unreleased
+
+- A healthcheck's checks hold about 6 threads on any machine. On a
+  machine with many CPUs they held more, and a `pids:` cap sized for the
+  8 the docs gave ended them: `ps` then said `unchecked`.
+- `up --force` after a service is renamed starts the new one even when
+  its program binds the address the old one held: orphans now go before
+  the start, as compose removes its orphans before it creates.
+- `ps` says a scheduled job whose run failed waits for its `restart:`
+  retry, where it said a run was in progress. `stop` of it says it
+  stopped the retry, and keeps the failed run's result.
+- `down` of a service whose `KillMode:` stops only its main process says
+  so, where it blamed a stop timeout.
+- A string `command:` takes `\;`, which systemd reads as a literal `;`
+  (`find ... -exec rm {} \;`).
+- An interpolated value in quotes takes the type of what it became, as in
+  compose: `oneshot: "${ON}"` is a boolean.
+- `config` names compose's `restart: on-failure:N` in the same round as
+  the keys it does not take.
+- `ls` and `version` refuse words after them. `enable`, `disable`,
+  `reenable`, `mask` and `preset` with no service named are refused in the
+  tool's words.
+
 ## v0.1.1
 
 - A project name may contain `-`. Units spell it `\x2d`, as

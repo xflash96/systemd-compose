@@ -220,6 +220,8 @@ func (pr *project) table() error {
 			switch {
 			case s.ActiveState == "failed":
 				inactive = " (its last run failed: " + logs + ")"
+			case s.Restarting():
+				inactive = " (its last run failed, and systemd runs it again soon: " + logs + ")"
 			case s.ActiveState == "activating":
 				inactive = " (a run is in progress)"
 			}

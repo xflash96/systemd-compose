@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/xflash96/systemd-compose/internal/render"
@@ -49,44 +48,6 @@ func (pr *project) removeLeftovers(files []string) {
 			fmt.Printf("  warning: %s: not removed: %v\n", f, err)
 		}
 	}
-}
-
-// takenAddresses splits off the orphans that must go before the start: a
-// dropped socket that listens on an address a socket of this render takes
-// (a service renamed with its listen:), with its service, which holds the
-// socket's fd. The new socket cannot bind the address while the old one
-// holds it.
-func (pr *project) takenAddresses(orphans []orphan) (early, later []orphan) {
-	wanted := map[string]bool{}
-	for _, u := range pr.rendered {
-		if strings.HasSuffix(u.Name, ".socket") {
-			for _, a := range render.Directive(u.Text, "Socket", "ListenStream") {
-				wanted[a] = true
-			}
-		}
-	}
-	first := map[string]bool{}
-	for _, o := range orphans {
-		if !strings.HasSuffix(o.unit, ".socket") {
-			continue
-		}
-		text, err := os.ReadFile(filepath.Join(pr.renderDir, o.unit))
-		if err != nil {
-			continue
-		}
-		if slices.ContainsFunc(render.Directive(string(text), "Socket", "ListenStream"), func(a string) bool { return wanted[a] }) {
-			first[o.unit] = true
-			first[strings.TrimSuffix(o.unit, ".socket")+".service"] = true
-		}
-	}
-	for _, o := range orphans {
-		if first[o.unit] {
-			early = append(early, o)
-		} else {
-			later = append(later, o)
-		}
-	}
-	return early, later
 }
 
 type orphan struct {

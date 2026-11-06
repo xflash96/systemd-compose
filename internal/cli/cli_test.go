@@ -24,6 +24,10 @@ func TestVerbHelp_PrintsTheVerbsEntries(t *testing.T) {
 	if !strings.Contains(verbHelp("restart"), "start|stop|restart") {
 		t.Error("a verb in a combined line is found")
 	}
+	lines := strings.Split(strings.TrimSuffix(up, "\n"), "\n")
+	if last := lines[len(lines)-1]; len(last) > manWidth {
+		t.Errorf("the closing line is %d columns: %s", len(last), last)
+	}
 }
 
 // help WORD answers a systemctl verb with a line, and a word that is no
@@ -110,6 +114,16 @@ func TestOutcome_SilentOnlyForABareExitCode(t *testing.T) {
 func TestRun_RefusesAnEmptyName(t *testing.T) {
 	for _, args := range [][]string{{"-p", "", "config"}, {"--project-name=", "config"}, {"--profile=", "config"}, {"--profile", "", "config"}} {
 		if err := run(args); err == nil || !strings.Contains(err.Error(), "needs a name") {
+			t.Errorf("%q: %v", args, err)
+		}
+	}
+}
+
+// ls and version take no words after them: a typo must not read as a
+// listing.
+func TestRun_RefusesWordsAfterLsAndVersion(t *testing.T) {
+	for _, args := range [][]string{{"ls", "-a"}, {"version", "x"}} {
+		if err := run(args); err == nil || !strings.Contains(err.Error(), "takes no arguments") {
 			t.Errorf("%q: %v", args, err)
 		}
 	}

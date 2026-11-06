@@ -2,7 +2,7 @@
 
 The api serves a list of books from a SQLite database. A POST queues a
 book, and the worker catalogues it. migrate creates the database before
-the api starts. It needs python3.
+the api starts. It needs python3 and curl.
 
 ```sh
 cd examples/webapp

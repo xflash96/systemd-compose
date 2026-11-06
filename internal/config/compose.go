@@ -140,15 +140,21 @@ func composeForms(m *mapNode, ctx string) []finding {
 			found = append(found, composeHealthcheck(h, ctx)...)
 		}
 	}
+	if n := m.get("restart"); n != nil && n.Kind == yaml.ScalarNode && strings.HasPrefix(n.Value, "on-failure:") {
+		found = append(found, finding{n.Line, fmt.Sprintf("line %d: %s: restart: %q %s", n.Line, ctx, n.Value, retryCount)})
+	}
 	return found
 }
+
+// retryCount answers compose's on-failure:N.
+const retryCount = "has no faithful systemd form: docker counts automatic restarts and forgets them on a manual start, systemd's start limit counts every start, manual ones included; write restart: on-failure and set unit: Unit: StartLimitBurst: and StartLimitIntervalSec: yourself"
 
 // composeHealthcheck names a healthcheck's compose forms: disable:, and
 // test:'s prefixes and string form.
 func composeHealthcheck(m *mapNode, ctx string) []finding {
 	var found []finding
 	if dn := m.get("disable"); dn != nil {
-		found = append(found, finding{dn.Line, fmt.Sprintf("line %d: %s: healthcheck: disable: compose's %s", dn.Line, ctx, noHealthcheck)})
+		found = append(found, finding{dn.Line, fmt.Sprintf("line %d: %s: healthcheck: disable: compose's disable: %s", dn.Line, ctx, noHealthcheck)})
 	}
 	if tn := m.get("test"); tn != nil {
 		if why := composeTest(tn); why != "" {

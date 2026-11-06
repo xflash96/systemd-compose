@@ -368,8 +368,11 @@ func interpolateTree(doc *yaml.Node, vars map[string]string) (map[string][]strin
 				return nil
 			}
 			n.Value = v
-			if n.Style == 0 {
-				n.Tag = ""
+			// read as what it became, quoted or not, as compose's is: a
+			// quoted "${ON}" is a boolean where one is wanted; a quoted
+			// value that came out empty stays an empty string
+			if n.Style == 0 || v != "" {
+				n.Tag, n.Style = "", 0
 			}
 		}
 		return nil

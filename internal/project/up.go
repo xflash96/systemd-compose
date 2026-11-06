@@ -412,11 +412,7 @@ func (pr *project) planUnit(pl *upPlan, name, text string) (planRow, error) {
 	rebuilt := svc != nil && slices.Contains(pl.builds, svc) && svc.Schedule == nil && pr.p.UnitOf(svc) == name
 	switch {
 	case changed && name == pr.p.SliceName():
-		if row.change == changeNoBaseline {
-			row.actions = append(row.actions, "applied in place by the reload, nothing restarts")
-		} else {
-			row.actions = append(row.actions, "applied in place by the reload (new limits), nothing restarts")
-		}
+		row.actions = append(row.actions, "applied in place by the reload, nothing restarts")
 	case changed && name == pr.p.TargetName():
 		row.actions = append(row.actions, "applied by the reload (the boot set)")
 	case svc != nil && !isRestartable && strings.HasSuffix(name, ".service") && st.ActiveState == "active":
@@ -649,12 +645,14 @@ func (pr *project) apply(pl *upPlan) error {
 	if err := pr.m.Enable(pr.p.TargetName()); err != nil {
 		return fmt.Errorf("enable: %w", err)
 	}
-	// A socket or timer a service shed goes before that service restarts:
-	// a socket still listening hands its fd to the new run, so the dropped
-	// listen: would never take effect.
-	early, later := pr.takenAddresses(pl.gone)
-	shed, gone := append(pl.shed, early...), later
-	if err := pr.retire(shed); err != nil {
+	// Orphans go before the start, as compose removes its orphans before
+	// it creates: a renamed service's new run cannot bind the address its
+	// old one, or that one's socket, still holds. A socket or timer a
+	// service shed goes before that service restarts: a socket still
+	// listening hands its fd to the new run, so the dropped listen: would
+	// never take effect. The plan said every orphan goes (an active one only
+	// with --force), so it goes whether or not the start succeeds.
+	if err := pr.retire(append(pl.shed, pl.gone...)); err != nil {
 		return err
 	}
 	if len(pl.toStop) > 0 {
@@ -669,11 +667,6 @@ func (pr *project) apply(pl *upPlan) error {
 	}
 	res, err := pr.startAll(pl)
 	if err != nil {
-		return err
-	}
-	// An orphan is no part of whether the project came up: the plan said
-	// it goes (an active one only with --force), and it goes either way.
-	if err := pr.retire(gone); err != nil {
 		return err
 	}
 	systemd.SweepEmptyWants(pl.unitDir)

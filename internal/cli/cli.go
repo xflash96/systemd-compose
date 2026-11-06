@@ -115,6 +115,9 @@ parsed:
 		fmt.Print(help)
 		return nil
 	case "version", "--version":
+		if len(args) > 0 {
+			return fmt.Errorf("version takes no arguments")
+		}
 		printVersion()
 		return nil
 	case probe.Verb:
@@ -125,6 +128,9 @@ parsed:
 		}
 		if f.File != "" || f.Name != "" || len(f.Profiles) > 0 {
 			return fmt.Errorf("ls lists every project registered here; -f, -p and --profile name one project and mean nothing to it")
+		}
+		if len(args) > 0 {
+			return fmt.Errorf("ls takes no arguments: it lists every project registered here")
 		}
 		m := &systemd.Manager{User: true}
 		if err := m.Reachable(); err != nil {
@@ -168,7 +174,7 @@ parsed:
 	}
 	if cfg != "" {
 		if system {
-			return fmt.Errorf("--system is refused inside a project (%s): projects live on the user instance: their services are yours, not the system's", cfg)
+			return fmt.Errorf("--system is refused for a project (%s): projects live on the user instance: their services are yours, not the system's", cfg)
 		}
 		// Before the yaml is read: a wrong flag is answered even while the
 		// file does not load yet.

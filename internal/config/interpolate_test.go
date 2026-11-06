@@ -146,3 +146,31 @@ func TestLoad_NotesAVariableTheServiceSetsItself(t *testing.T) {
 		t.Errorf("unset: %v", err)
 	}
 }
+
+// A value filled in from .env is read as what it became, quoted or not, as
+// compose's is: "${ON}" is a boolean where one is wanted, and a quoted
+// value that came out empty stays an empty string.
+func TestLoad_TypesAnInterpolatedValueByWhatItBecame(t *testing.T) {
+	testenv.ClearOverrides(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("ON=true\nOFF=false\nPORT=8080\nNONE=\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ConfigFileName), []byte(`services:
+  a: {command: x, oneshot: "${ON}", environment: {PORT: "${PORT}", EMPTY: "${NONE}"}}
+  b: {command: x, depends_on: {a: {required: "${ON}", condition: service_completed_successfully}}}
+  c: {command: x, schedule: {calendar: daily, persistent: "${OFF}"}}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Load(filepath.Join(dir, ConfigFileName), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := p.Service("a"); !a.Oneshot || len(a.Environment) != 2 || a.Environment[0] != (KV{"PORT", "8080"}) || a.Environment[1] != (KV{"EMPTY", ""}) {
+		t.Errorf("service a: oneshot %v, environment %q", a.Oneshot, a.Environment)
+	}
+	if p.Service("c").Schedule.Persistent {
+		t.Error(`persistent: "${OFF}" read as true`)
+	}
+}

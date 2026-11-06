@@ -41,4 +41,9 @@ func TestConfigDir_ReadsTheManagersUnitPath(t *testing.T) {
 	if got := configDir("/run/user/1000/systemd/user.control /etc/systemd/user"); got != "" {
 		t.Errorf("no persistent control dir: %q", got)
 	}
+	// systemd 249 and 255 quote an entry with a space in it: none then, and
+	// UnitDir takes this process's HOME, which is the same directory
+	if got := configDir(`"/home/a b/.config/systemd/user.control" /run/user/1000/systemd/user.control`); got != "" {
+		t.Errorf("a home with a space: %q", got)
+	}
 }

@@ -127,6 +127,8 @@ func (pr *project) act(verb string, units, flags []string) error {
 		case pending[n] != "":
 			job, _, _ := strings.Cut(pending[n], " ")
 			what = "still " + map[string]string{"start": "starting", "stop": "stopping", "restart": "restarting"}[job] + " (its " + job + " job had not finished after " + systemd.SettleFor.String() + ")"
+		case job && b.Restarting() && !a.Active():
+			what = "stopped: its last run failed, and the retry it waited for will not run" // systemd keeps the failed run's result
 		case job && b.Active() && !a.Active():
 			what = "stopped a run in progress"
 			reset = append(reset, n) // a run stopped on purpose is no failed run
