@@ -169,7 +169,7 @@ func importService(dirs []render.UnitLine, home string) (*yaml.Node, []string) {
 	svc := &yaml.Node{Kind: yaml.MappingNode}
 	// a user unit with no WorkingDirectory= runs in the home directory;
 	// a project's service runs in the yaml's unless working_dir: says so
-	wd, why := scalarNode(strings.ReplaceAll(home, "$", "$$")), "where the unit ran: a user unit's default"
+	wd, why := scalarNode(strings.ReplaceAll(home, "$", "$$")), "where the unit ran, a user unit's default; without this line it runs in the project's directory"
 	if vs := values[key{"Service", "WorkingDirectory"}]; len(vs) > 0 {
 		w := strings.TrimPrefix(vs[len(vs)-1], "-")
 		if p, ok := homePath(w, home); ok {

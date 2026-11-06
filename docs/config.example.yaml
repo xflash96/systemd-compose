@@ -91,6 +91,8 @@ services:
     # - no, on-failure, always, or unless-stopped (the same as always:
     #   systemd never restarts a unit you stopped by hand)
     # - the map form {policy, delay} also sets RestartSec= (x-node)
+    # - systemd gives up on a service started 5 times within 10s, and ps
+    #   says so; a delay: of 2s or more keeps it retrying, as docker does
     restart: always
     # on_change: what up does when the service's definition changes
     # - optional, default: restart
@@ -176,6 +178,8 @@ services:
     # - a value from a file wins over environment:, so the two may not set one
     #   key to different values
     # - up restarts the service when a file changes
+    # - the units name the file, not its values: a secret belongs here, not
+    #   in environment:
     env_file:
       - .env
       - {path: .env.local, required: false}

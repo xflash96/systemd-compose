@@ -175,11 +175,50 @@ steps whose
 path is missing.
 Register the units, start the project, and restart the services that
 changed.
+The project then starts at boot, while lingering is on (see
+.BR FILES ).
 .B up
 exits 1, naming the unit, when one failed to start, keeps restarting, or did
 not start because a service it requires is not up.
 A service counts as started once its program has run 3 seconds.
 One that restarted on the way up is watched for up to 15 seconds.
+The plan says of each unit what changed, then what
+.B up
+does about it:
+.RS
+.TP
+.B new
+It was not registered before.
+.TP
+.B unchanged
+Nothing to apply.
+.TP
+.B unchanged (env_file read)
+An env file changed, and the service's run began after the change: it runs
+with the file already.
+.TP
+.BR changed ", " "changed (env_file)"
+Its unit, or an env file it reads, changed: a running service restarts,
+unless it has
+.BR "on_change: start-only" .
+.TP
+.B changed (not applied)
+It still runs an earlier definition: it has
+.BR "on_change: start-only" ,
+or the last
+.B up
+had
+.B \-\-no\-recreate
+or did not finish.
+.TP
+.B changed (no baseline)
+The file it was registered with is gone while it runs, so
+.B up
+cannot tell what changed, and restarts it.
+.TP
+.B file gone, written again
+The file it was registered with is gone, and it is not running.
+.RE
 .RS
 .TP
 .B \-\-dry\-run

@@ -27,7 +27,7 @@ restarts it, and keeps its logs in the journal.
 | `command`, `entrypoint` | the same; the program is looked up on this host when `up` renders the units |
 | `working_dir` | the same, relative to the yaml |
 | `environment`, `env_file` | the same, with one difference below |
-| `restart` | the same words; `unless-stopped` is `always`, and `on-failure:N` is refused |
+| `restart` | the same words; `unless-stopped` is `always`, and `on-failure:N` is refused; without a `delay`, systemd gives up after 5 starts in 10s |
 | `depends_on` | the same forms and conditions |
 | `healthcheck` | the same keys but `disable`; `test` has no `CMD` prefix |
 | `profiles` | the same |

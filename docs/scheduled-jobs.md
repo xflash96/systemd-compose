@@ -71,7 +71,9 @@ systemd-compose stop backup        # disarm the timer; start backup arms it agai
 `run` exits with the job's exit status. A run that the timer started is
 in the journal, and `ps` shows a failed one until the next run succeeds.
 To run the job now as the timer would, with its output in `logs`, start
-its unit: `systemctl --user start PROJECT-backup.service`.
+its unit: `systemctl --user start PROJECT-backup.service`. The LAST column
+of `list-timers` counts only the timer's own runs, so `logs backup` is
+where a run started by hand shows.
 
 ## How a job runs
 

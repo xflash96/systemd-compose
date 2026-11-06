@@ -60,7 +60,7 @@ func CheckArgs(verb string, args []string) ([]string, error) {
 		"up":     "up takes no service names: it brings up the whole project (start SERVICE starts one, once up has registered it)",
 		"down":   "down takes the whole project down (stop SERVICE stops one)",
 		"ps":     "ps shows the whole project (logs SERVICE shows one)",
-		"config": "config takes no arguments: it prints the yaml and every unit as rendered",
+		"config": "config takes no arguments: it prints the yaml and every unit as rendered; systemd-compose cat SERVICE shows one service's unit as systemd loaded it",
 	}
 	ok, checked := known[verb]
 	if !checked {

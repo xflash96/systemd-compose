@@ -261,7 +261,7 @@ func (pr *project) table() error {
 		}
 		switch c, ok := checks[n]; {
 		case ok && health[n] == "unhealthy":
-			inactive += fmt.Sprintf(" (unhealthy since %s: %d checks failed in a row, the last: %s; %s)", c.Since.Local().Format("15:04:05"), c.Failed, c.Last, logs)
+			inactive += fmt.Sprintf(" (unhealthy since %s; %d checks failed in a row so far, the last: %s; %s)", c.Since.Local().Format("15:04:05"), c.Failed, c.Last, logs)
 		case health[n] == "unchecked":
 			inactive += " (nothing checks it now; " + pr.cmd() + " restart " + svc.Name + " starts the checks)"
 		}

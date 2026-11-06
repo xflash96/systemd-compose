@@ -519,7 +519,7 @@ func TestHealthcheck_ChecksWhileItRuns(t *testing.T) {
 	check(t, "  leaves the checks running", firstErr(equal("watches", watches(), 1), p.sc("ps").shows(row+`healthy +copied$`)))
 
 	os.Remove(p.path("ok"))
-	check(t, "two failed checks in a row: ps says unhealthy, since when, and what the last printed", psUntil(row+`unhealthy +copied \(unhealthy since [0-9:]+: 2 checks failed in a row, the last: exit status 3; its output: no ok file on two lines; `))
+	check(t, "two failed checks in a row: ps says unhealthy, since when, and what the last printed", psUntil(row+`unhealthy +copied \(unhealthy since [0-9:]+; 2 checks failed in a row so far, the last: exit status 3; its output: no ok file on two lines; `))
 	check(t, "  logs say so", p.sc("logs", "s").says(`probe: unhealthy: 2 checks failed in a row, the last: exit status 3; its output: no ok file on two lines`))
 	check(t, "  and nothing restarted it", equal("MainPID", mainPID(unit), pid))
 	p.file("ok", "")
