@@ -78,6 +78,13 @@ its sum, and puts the binary in `~/.local/bin` and the man page in
 curl -fsSL https://raw.githubusercontent.com/xflash96/systemd-compose/main/scripts/install.sh | sh
 ```
 
+Or from PyPI, with [uv](https://docs.astral.sh/uv/) or
+[pipx](https://pipx.pypa.io). The wheel holds the release's binary:
+
+```
+uv tool install systemd-compose     # or: pipx install systemd-compose
+```
+
 Or by hand: download the tarball for your machine and `SHA256SUMS` from the
 [releases page](https://github.com/xflash96/systemd-compose/releases). In
 that directory:

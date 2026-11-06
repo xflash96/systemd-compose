@@ -4,6 +4,8 @@ Each release of systemd-compose, newest first.
 
 ## Unreleased
 
+- systemd-compose is on PyPI: `uv tool install systemd-compose` or `pipx
+  install systemd-compose` installs the release's binary.
 - A healthcheck's checks hold about 6 threads on any machine. On a
   machine with many CPUs they held more, and a `pids:` cap sized for the
   8 the docs gave ended them: `ps` then said `unchecked`.

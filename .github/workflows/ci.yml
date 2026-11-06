@@ -64,3 +64,33 @@ jobs:
           args: release --clean --release-notes=${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+  pypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release]
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write # trusted publishing: PyPI takes this job's OIDC token; no PyPI token is stored
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: a wheel of each archive the release published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REL: ${{ runner.temp }}/release
+        run: |
+          gh release download "$GITHUB_REF_NAME" -p '*.tar.gz' -p SHA256SUMS -D "$REL"
+          (cd "$REL" && sha256sum -c SHA256SUMS)
+          python3 -I scripts/wheel.py wheels "$REL"/*.tar.gz
+      - name: the amd64 wheel installs, and its binary says the tag
+        env:
+          VENV: ${{ runner.temp }}/venv
+        run: |
+          python3 -m venv "$VENV"
+          "$VENV/bin/pip" install -q --no-index --find-links wheels systemd-compose
+          "$VENV/bin/systemd-compose" --version >"$VENV/version"
+          grep -qF "systemd-compose $GITHUB_REF_NAME " "$VENV/version"
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: wheels/
