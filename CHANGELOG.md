@@ -15,8 +15,11 @@ Each release of systemd-compose, newest first.
 - `ps` says a scheduled job whose run failed waits for its `restart:`
   retry, where it said a run was in progress. `stop` of it says it
   stopped the retry, and keeps the failed run's result.
-- `down` of a service whose `KillMode:` stops only its main process says
-  so, where it blamed a stop timeout.
+- `down` says a service's stop left processes running, where it blamed a
+  stop timeout and `SendSIGKILL=no` for any such process (a `KillMode:`
+  that stops only the main one).
+- The install script and `make install` replace a link they find in the
+  way (uv's or pipx's), where they wrote through it into that tool's copy.
 - A string `command:` takes `\;`, which systemd reads as a literal `;`
   (`find ... -exec rm {} \;`).
 - An interpolated value in quotes takes the type of what it became, as in

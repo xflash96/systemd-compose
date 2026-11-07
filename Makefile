@@ -13,6 +13,7 @@ build:
 # The static binary in PREFIX/bin, and the man page in PREFIX/share/man/man1.
 install:
 	mkdir -p $(PREFIX)/bin $(PREFIX)/share/man/man1
+	rm -f $(PREFIX)/bin/systemd-compose $(PREFIX)/share/man/man1/systemd-compose.1
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags='-s -w' -o $(PREFIX)/bin/systemd-compose .
 	cp docs/systemd-compose.1 $(PREFIX)/share/man/man1/
 

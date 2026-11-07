@@ -76,7 +76,8 @@ a line at each change. As in compose, nothing restarts an unhealthy
 service: `restart:` acts when the program exits. The checks run in the
 service's cgroup, as compose's run in its container, so they count
 toward its `resources:`: the process that runs them holds about 10 MB
-and 6 threads on any machine, which `pids:` counts.
+and 6 threads on any machine, and each check runs one process more.
+`pids:` counts them all, beside the program's own.
 
 ## Without a healthcheck
 

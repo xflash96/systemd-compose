@@ -36,10 +36,11 @@ def pep440(version):
 
 def absolute_links(readme, tag):
     """README's relative links point into the repository at the tag, since
-    PyPI's page has no files beside it."""
+    PyPI's page has no files beside it, and its #anchors at the README
+    there, since PyPI gives its headings no ids."""
     return re.sub(
-        r"\]\((?!https?://|#)([^)\s]+)\)",
-        lambda m: f"]({REPO}/blob/{tag}/{m[1]})",
+        r"\]\((?!https?://)([^)\s]+)\)",
+        lambda m: f"]({REPO}/blob/{tag}/{'README.md' if m[1].startswith('#') else ''}{m[1]})",
         readme,
     )
 

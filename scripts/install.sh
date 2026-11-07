@@ -37,6 +37,8 @@ done
 	{ echo "install.sh: $name.tar.gz does not match SHA256SUMS" >&2; exit 1; }
 tar -C "$tmp" -xzf "$tmp/$name.tar.gz"
 mkdir -p "$prefix/bin" "$prefix/share/man/man1"
+# removed first: a link there (uv's or pipx's) would be written through
+rm -f "$prefix/bin/systemd-compose" "$prefix/share/man/man1/systemd-compose.1"
 cp "$tmp/$name/systemd-compose" "$prefix/bin/"
 cp "$tmp/$name/docs/systemd-compose.1" "$prefix/share/man/man1/"
 echo "install.sh: $prefix/bin/systemd-compose $ver, and its man page"

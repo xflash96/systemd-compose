@@ -650,24 +650,22 @@ func (pr *project) apply(pl *upPlan) error {
 	// old one, or that one's socket, still holds. A socket or timer a
 	// service shed goes before that service restarts: a socket still
 	// listening hands its fd to the new run, so the dropped listen: would
-	// never take effect. The plan said every orphan goes (an active one only
-	// with --force), so it goes whether or not the start succeeds.
-	if err := pr.retire(append(pl.shed, pl.gone...)); err != nil {
-		return err
-	}
+	// never take effect. An orphan is no part of whether the project comes
+	// up: one that would not go is named, and the start goes on.
+	retired := pr.retire(append(pl.shed, pl.gone...))
 	if len(pl.toStop) > 0 {
 		if err := pr.m.Run(append([]string{"stop"}, pl.toStop...)...); err != nil {
-			return fmt.Errorf("stop: %w", err)
+			return errors.Join(retired, fmt.Errorf("stop: %w", err))
 		}
 		// What the stop of a run from the old definition leaves is not a
 		// run of the job that failed.
 		if err := pr.m.ResetFailed(pl.toStop); err != nil {
-			return err
+			return errors.Join(retired, err)
 		}
 	}
 	res, err := pr.startAll(pl)
 	if err != nil {
-		return err
+		return errors.Join(retired, err)
 	}
 	systemd.SweepEmptyWants(pl.unitDir)
 	for _, w := range pl.warnings {
@@ -675,9 +673,9 @@ func (pr *project) apply(pl *upPlan) error {
 	}
 	fmt.Println()
 	if err := pr.table(); err != nil {
-		return err
+		return errors.Join(retired, err)
 	}
-	return res.report()
+	return errors.Join(retired, res.report())
 }
 
 // runBuilds runs the builds the plan names, in the project's slice and

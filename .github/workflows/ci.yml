@@ -89,8 +89,11 @@ jobs:
         run: |
           python3 -m venv "$VENV"
           "$VENV/bin/pip" install -q --no-index --find-links wheels systemd-compose
-          "$VENV/bin/systemd-compose" --version >"$VENV/version"
-          grep -qF "systemd-compose $GITHUB_REF_NAME " "$VENV/version"
+          got=$("$VENV/bin/systemd-compose" --version)
+          case ${got%%$'\n'*} in # as scripts/check-build.sh reads line 1
+          "systemd-compose $GITHUB_REF_NAME" | "systemd-compose $GITHUB_REF_NAME "*) ;;
+          *) echo "::error::the wheel's binary says: $got"; exit 1 ;;
+          esac
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: wheels/

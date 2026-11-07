@@ -109,14 +109,10 @@ func (pr *project) down(args []string) error {
 	for _, n := range names {
 		r := pr.registrationOf(unitDir, n)
 		if strings.HasSuffix(n, ".service") && !st[n].Active() && pr.leftRunning(n) {
-			// processes the stop left (SendSIGKILL=no after its timeout, or
-			// a KillMode= that kills only the main process): the project is
-			// not down
-			why := "its stop left processes of it running (its KillMode= kills only the main one)"
-			if st[n].Result == "timeout" {
-				why = "it outlived its stop timeout, and SendSIGKILL=no left it"
-			}
-			fmt.Printf("  %-32s still running: %s; systemctl --user kill -s KILL %s ends it\n", n, why, unitWords(n))
+			// processes the stop left (SendSIGKILL=no after its timeout,
+			// which the stop said, or a KillMode= that kills only the main
+			// process): the project is not down
+			fmt.Printf("  %-32s still running: its stop left processes of it running; systemctl --user kill -s KILL %s ends them\n", n, unitWords(n))
 			strays++
 			continue
 		}

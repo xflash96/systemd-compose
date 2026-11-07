@@ -112,7 +112,10 @@ func (pr *project) unregister(units []string) (stopped int, err error) {
 	if len(running) > 0 {
 		if after, err := pr.m.States(running); err == nil {
 			for _, u := range running {
-				if after[u].Result == "timeout" {
+				switch {
+				case after[u].Result == "timeout" && pr.leftRunning(u):
+					fmt.Printf("  %s ignored SIGTERM past its stop timeout, and SendSIGKILL=no left it running\n", u)
+				case after[u].Result == "timeout":
 					fmt.Printf("  %s ignored SIGTERM and was killed at its stop timeout\n", u)
 				}
 				if after[u].Running() {

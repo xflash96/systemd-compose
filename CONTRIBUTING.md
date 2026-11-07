@@ -78,4 +78,6 @@ renames that heading to the tag exactly, such as `## v0.1.1`, then pushes
 the tag: the release job reads the section by that heading. CI tests the
 tag, builds the archives with goreleaser, and publishes them with that
 section as the release notes. A last job makes a wheel of each archive's
-binary with `scripts/wheel.py` and publishes the wheels on PyPI.
+binary with `scripts/wheel.py` and publishes the wheels on PyPI. A
+pre-release tag is `vX.Y.Z-rc.N` (or `-alpha.N`, `-beta.N`), the forms
+PyPI's versions have.

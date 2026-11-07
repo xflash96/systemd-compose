@@ -214,6 +214,21 @@ func TestUp_RenamedService(t *testing.T) {
 	check(t, "  renamed: up --force exits 0", p.sc("up", "--force").ok())
 	check(t, "  and the new one runs", p.sc("ps").shows("^"+regexp.QuoteMeta(p.unit("web2", ".service"))+` +loaded +active +running`))
 	check(t, "  down exits 0", p.sc("down").ok())
+
+	// An orphan that will not stop is named, and the rest comes up.
+	p = newProject(t, "rnr", "rnr", "name: NAME\nservices:\n  old: {command: [sleep, infinity], unit: {Unit: {RefuseManualStop: \"yes\"}}}\n")
+	gone := func() {
+		systemctl("kill", "-s", "KILL", p.unit("old", ".service"))
+		systemctl("reset-failed", p.unit("old", ".service"))
+	}
+	t.Cleanup(gone)
+	check(t, "up of a service that refuses a stop", p.sc("up").ok())
+	p.write("name: NAME\nservices:\n  fresh: {command: [sleep, infinity]}\n")
+	up := p.sc("up", "--force")
+	check(t, "  renamed: up --force exits nonzero and names the orphan still running", firstErr(up.fails(), up.says(regexp.QuoteMeta(p.unit("old", ".service"))+" still running after the stop")))
+	check(t, "  and starts the new one all the same", active(p.unit("fresh", ".service")))
+	gone()
+	check(t, "  down exits 0", p.sc("down").ok())
 }
 
 // TestProfiles_RequiredByAnother checks a yaml whose service requires a
@@ -339,6 +354,20 @@ services:
 	down := p.sc("down")
 	check(t, "  down exits nonzero and names what it left", firstErr(down.fails(), down.says("still running: its stop left processes of it running")))
 	check(t, "  without blaming a stop timeout", down.lacks("stop timeout"))
+	kill()
+
+	p = newProject(t, "sk3", "sk3", `name: NAME
+services:
+  s:
+    command: [sh, -c, "trap \"\" TERM; while :; do sleep 1; done"]
+    unit: {Service: {SendSIGKILL: "no", TimeoutStopSec: "2s"}}
+`)
+	kill = func() { systemctl("kill", "-s", "KILL", p.unit("s", ".service")) }
+	t.Cleanup(kill)
+	check(t, "up of a service that ignores SIGTERM, under SendSIGKILL=no, again", p.sc("up").ok())
+	down = p.sc("down")
+	check(t, "  down of it exits nonzero and says SendSIGKILL=no left it", firstErr(down.fails(), down.says("ignored SIGTERM past its stop timeout, and SendSIGKILL=no left it running")))
+	check(t, "  and not that it was killed", down.lacks("was killed"))
 	kill()
 }
 
