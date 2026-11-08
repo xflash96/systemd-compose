@@ -283,7 +283,7 @@ link the yaml into a local directory. A `systemd-compose.yaml` that is a
 symlink makes a project where the link is, not where the yaml is.
 
 ```
-mkdir -p ~/services/demo && cd ~/services/demo
+mkdir -p ~/projects/demo && cd ~/projects/demo
 ln -s /mnt/nfs/src/demo/systemd-compose.yaml .
 sc up
 ```
@@ -315,7 +315,7 @@ a timer or socket that starts it is printed as notes, for `schedule:` or
 file. For a foo that no timer or socket starts, they are:
 
 ```
-mkdir -p ~/services/foo && cd ~/services/foo
+mkdir -p ~/projects/foo && cd ~/projects/foo
 sc import foo > systemd-compose.yaml
 systemctl --user disable --now --quiet foo.service
 rm ~/.config/systemd/user/foo.service
