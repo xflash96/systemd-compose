@@ -2,7 +2,7 @@
 
 Each release of systemd-compose, newest first.
 
-## Unreleased
+## v0.1.2
 
 - systemd-compose is on PyPI: `uv tool install systemd-compose` or `pipx
   install systemd-compose` installs the release's binary.
